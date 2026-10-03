@@ -1,0 +1,30 @@
+<resources>
+    <string name="nav_counter">Contador</string>
+    <string name="nav_tasks">Tareas</string>
+    <string name="notion_priority_review">Revisar prioridades en Notion</string>
+    <string name="new_task_hint">Nueva tarea</string>
+    <string name="add_task">Añadir</string>
+    <string name="delete_task">Eliminar</string>
+    <string name="edit_task">Editar tarea</string>
+    <string name="save_task">Guardar</string>
+    <string name="cancel_task">Cancelar</string>
+    <string name="nav_planner">Mañana</string>
+    <string name="planner_title">Mañana</string>
+    <string name="planner_range">Del %1$s al %2$s</string>
+    <string name="planner_empty_slot">Añadir tarea</string>
+    <string name="planner_completed_task">%1$s · completada</string>
+    <string name="planner_clear_slot">Dejar este bloque vacío</string>
+    <string name="planner_no_tasks">No tienes tareas pendientes. Añade alguna desde la pestaña Tareas.</string>
+    <string name="planner_today">Hoy · %1$s</string>
+    <string name="planner_tomorrow">Mañana · %1$s</string>
+    <string name="planned_task_badge">Planificada · %1$s</string>
+    <string name="planned_task_badge_multiple">Planificada · %1$s · %2$d bloques</string>
+    <string name="planned_task_today">hoy, %1$s</string>
+    <string name="planned_task_tomorrow">mañana, %1$s</string>
+    <string name="planner_expand_day">Expandir %1$s, %2$s</string>
+    <string name="planner_collapse_day">Compactar %1$s, %2$s</string>
+    <plurals name="planner_assigned_count">
+        <item quantity="one">%d tarea</item>
+        <item quantity="other">%d tareas</item>
+    </plurals>
+</resources>

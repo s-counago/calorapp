@@ -1,0 +1,16 @@
+<resources>
+    <color name="background">#F8F5ED</color>
+    <color name="surface">#FFFCF6</color>
+    <color name="surface_raised">#EEEAE1</color>
+    <color name="primary">#214E3B</color>
+    <color name="primary_fill">#214E3B</color>
+    <color name="primary_dark">#183C30</color>
+    <color name="protein">#50684C</color>
+    <color name="protein_dark">#E6EBDD</color>
+    <color name="cosmic_pink">#656960</color>
+    <color name="cosmic_peach">#AA4C30</color>
+    <color name="card_stroke">#E2DED3</color>
+    <color name="planned_background">#E6EBDD</color>
+    <color name="text_main">#183C30</color>
+    <color name="text_muted">#626960</color>
+</resources>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Activar HTTPS de Sure en Android</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.6; }
+    body { max-width: 640px; margin: 0 auto; padding: 32px 24px; }
+    h1 { font-size: 1.8rem; line-height: 1.2; }
+    li { margin: 18px 0; }
+    a { color: #207b60; }
+    .button { display: inline-block; padding: 12px 18px; border-radius: 10px; background: #17634e; color: white; text-decoration: none; font-weight: 600; }
+    code { overflow-wrap: anywhere; }
+    .detail { font-size: .9rem; opacity: .8; }
+    @media (prefers-color-scheme: dark) { a { color: #89d5b6; } }
+  </style>
+</head>
+<body>
+  <p>Sure · Acceso privado</p>
+  <h1>Activa HTTPS en tu Android</h1>
+  <p>Deja Cloudflare One conectado durante estos pasos. Solo necesitas instalar este certificado una vez en cada dispositivo.</p>
+  <ol>
+    <li><a class="button" href="/sure-pausa-root-ca.crt" download="sure-pausa-root-ca.crt">Descargar certificado</a></li>
+    <li>En los ajustes de Android, busca <strong>Instalar un certificado</strong> y elige <strong>Certificado de CA</strong>. En algunos móviles está dentro de Seguridad y privacidad → Más ajustes de seguridad → Cifrado y credenciales.</li>
+    <li>Selecciona <code>sure-pausa-root-ca.crt</code> en Descargas y confirma con el PIN del móvil. El nombre del certificado es <strong>Sure Pausa - Local Root 2026</strong>.</li>
+    <li>Abre <a href="https://sure.pausa.internal">https://sure.pausa.internal</a> en tu navegador e inicia sesión en Sure.</li>
+  </ol>
+  <p>Android mostrará una advertencia al añadir una autoridad de confianza: tu dispositivo pasará a confiar en los certificados que firme esta autoridad local. Su clave privada permanece en tu PC. Puedes quitarla después desde las credenciales de confianza del dispositivo.</p>
+  <p>Si Sure sigue mostrando un error de certificado, cierra y vuelve a abrir el navegador. Comprueba también que One sigue conectado. No continúes saltándote un aviso de certificado.</p>
+  <p class="detail">Para comprobar que descargaste el archivo correcto, su huella SHA-256 es:<br><code>0E:F4:16:2C:79:57:AA:7C:78:EF:FD:3B:D5:6B:E3:90:1F:CE:92:8B:EE:C1:F0:9A:AC:B7:0D:63:0E:84:CF:4D</code></p>
+  <p class="detail">Esta página solo distribuye el certificado público. No solicita contraseñas ni datos del banco.</p>
+</body>
+</html>

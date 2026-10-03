@@ -1,0 +1,99 @@
+name: pausa-sure
+
+x-app-environment: &app-environment
+  RAILS_ENV: production
+  SELF_HOSTED: "true"
+  RAILS_FORCE_SSL: "true"
+  RAILS_ASSUME_SSL: "true"
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Set SECRET_KEY_BASE in .env}
+  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY:?Set the encryption primary key}
+  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY:?Set the encryption deterministic key}
+  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:?Set the encryption salt}
+  POSTGRES_USER: sure
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+  POSTGRES_DB: sure_production
+  DB_HOST: db
+  DB_PORT: "5432"
+  REDIS_URL: redis://redis:6379/1
+  TZ: Europe/Madrid
+  WEB_CONCURRENCY: "1"
+  RAILS_MAX_THREADS: "3"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  web:
+    image: ghcr.io/we-promise/sure:0.7.4@sha256:391b2c52acfe538065a41cdd1c9755f90d95ba17a2c06e9b6438b12098df3f3a
+    environment: *app-environment
+    volumes:
+      - app-storage:/rails/storage
+      - ./legal/privacy.html.erb:/rails/app/views/pages/privacy.html.erb:ro
+      - ./legal/terms.html.erb:/rails/app/views/pages/terms.html.erb:ro
+      - ./patches/enable-banking/enable_banking_items_controller.rb:/rails/app/controllers/enable_banking_items_controller.rb:ro
+      - ./patches/enable-banking/_enable_banking_panel.html.erb:/rails/app/views/settings/providers/_enable_banking_panel.html.erb:ro
+    healthcheck:
+      test: ["CMD", "ruby", "-rnet/http", "-e", "exit(Net::HTTP.get_response(URI('http://127.0.0.1:3000/up')).is_a?(Net::HTTPSuccess) ? 0 : 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+
+  worker:
+    image: ghcr.io/we-promise/sure:0.7.4@sha256:391b2c52acfe538065a41cdd1c9755f90d95ba17a2c06e9b6438b12098df3f3a
+    command: bundle exec sidekiq
+    environment: *app-environment
+    volumes:
+      - app-storage:/rails/storage
+    depends_on:
+      web:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+
+  db:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: sure
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: sure_production
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sure -d sure_production"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    image: redis:7.4-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  app-storage:
+  postgres-data:
+  redis-data:

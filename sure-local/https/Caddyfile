@@ -1,0 +1,53 @@
+{
+	admin off
+	auto_https disable_redirects
+	skip_install_trust
+	servers {
+		protocols h1 h2
+	}
+	pki {
+		ca local {
+			name "Sure Pausa Local CA"
+			root_cn "Sure Pausa - Local Root 2026"
+			intermediate_cn "Sure Pausa - Local Intermediate"
+		}
+	}
+}
+
+(certificate_download) {
+	@certificate path /sure-pausa-root-ca.crt
+	handle @certificate {
+		root * /srv/certificates
+		header Content-Type application/x-x509-ca-cert
+		header Content-Disposition "attachment; filename=sure-pausa-root-ca.crt"
+		header Cache-Control no-store
+		file_server
+	}
+	@setup path /instalar-certificado /instalar-certificado/
+	handle @setup {
+		root * /srv/certificates
+		rewrite * /index.html
+		header Cache-Control no-store
+		file_server
+	}
+}
+
+https://sure.pausa.internal, https://localhost {
+	tls internal
+	import certificate_download
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+http://sure.pausa.internal, http://localhost, http://sure.pausa.internal:3000, http://localhost:3000 {
+	import certificate_download
+	handle {
+		redir https://{host}{uri} 308
+	}
+}
+
+http://127.0.0.1:2018 {
+	bind 127.0.0.1
+	reverse_proxy web:3000
+}

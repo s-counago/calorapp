@@ -1,0 +1,9 @@
+<resources>
+    <string name="habit_goal_summary">%1$d de %2$d mínimos</string>
+    <string name="habit_week_range">%s · una marca por día</string>
+    <string name="habit_chart_weeks">%d semanas</string>
+    <plurals name="habit_weekly_days">
+        <item quantity="one">%d día</item>
+        <item quantity="other">%d días</item>
+    </plurals>
+</resources>

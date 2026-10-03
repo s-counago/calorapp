@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-24",
+  "after": "20:00",
+  "passengers": 2,
+  "ntfyTopic": "pon-aqui-un-topic-privado",
+  "ntfyServer": "https://ntfy.sh"
+}

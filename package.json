@@ -1,0 +1,12 @@
+{
+  "name": "calorapp-automation-tests",
+  "private": true,
+  "scripts": {
+    "test:automation": "node tools/seat-flow-smoke-test.js",
+    "monitor:renfe": "node tools/renfe-seat-monitor.js",
+    "monitor:renfe:check": "node tools/renfe-seat-monitor.js --once --dry-run"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.0"
+  }
+}
