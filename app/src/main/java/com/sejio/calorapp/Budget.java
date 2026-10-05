@@ -113,8 +113,18 @@ final class Budget {
         final Map<String, Long> planned = new HashMap<>();
         final Set<String> skipped = new HashSet<>(), dismissed = new HashSet<>(), reviewed = new HashSet<>(), separate = new HashSet<>();
         /** Savings goal per cycle and the cushion for unexpected costs, set on a day. Cents; day -1 = not set. */
-        long goal, cushion;
+        long goal, cushion, cushionGoal;
         int cushionDay = -1;
+        /** Money the owner put into the cushion: {day, cents}. It counts as savings in its cycle. */
+        final List<long[]> cushionMoves = new ArrayList<>();
+
+        /** The day the cushion's history starts: when its balance was set, or its first contribution. */
+        int cushionStart() {
+            if (cushionDay >= 0) return cushionDay;
+            int first = -1;
+            for (long[] move : cushionMoves) if (first < 0 || move[0] < first) first = (int) move[0];
+            return first;
+        }
 
         Rule rule(String id) {
             for (Rule rule : rules) if (rule.id.equals(id)) return rule;
@@ -147,7 +157,14 @@ final class Budget {
                     .put("merchant", new JSONObject(merchant)).put("alias", new JSONObject(alias)).put("names", new JSONObject(names))
                     .put("notes", new JSONObject(notes)).put("skipped", new JSONArray(skipped)).put("dismissed", new JSONArray(dismissed))
                     .put("reviewed", new JSONArray(reviewed)).put("separate", new JSONArray(separate)).put("planned", new JSONObject(planned))
-                    .put("goal", goal).put("cushion", cushion).put("cushionDay", cushionDay);
+                    .put("goal", goal).put("cushion", cushion).put("cushionDay", cushionDay).put("cushionGoal", cushionGoal)
+                    .put("cushionMoves", moves());
+        }
+
+        private JSONArray moves() throws Exception {
+            JSONArray list = new JSONArray();
+            for (long[] move : cushionMoves) list.put(new JSONArray().put(move[0]).put(move[1]));
+            return list;
         }
 
         static Settings fromJson(JSONObject json) throws Exception {
@@ -168,6 +185,10 @@ final class Budget {
                 for (int i = 0; i < planned.names().length(); i++) settings.planned.put(planned.names().getString(i), planned.getLong(planned.names().getString(i)));
             settings.goal = json.optLong("goal"); settings.cushion = json.optLong("cushion");
             settings.cushionDay = json.optInt("cushionDay", -1);
+            settings.cushionGoal = json.optLong("cushionGoal");
+            JSONArray moves = json.optJSONArray("cushionMoves");
+            if (moves != null) for (int i = 0; i < moves.length(); i++)
+                settings.cushionMoves.add(new long[]{moves.getJSONArray(i).getLong(0), moves.getJSONArray(i).getLong(1)});
             if (json.optInt("version", 1) < 2) settings.upgradeToTwo();
             return settings;
         }
@@ -384,7 +405,7 @@ final class Budget {
         boolean current, salaryEstimated;
         long salary, otherIncome, fixedPaid, fixedPending, freeSpent, previousAtSameDay = -1, averageDaily = -1;
         /** Savings: what the owner put aside (TR purchases minus saveback), the gift and the target for the cycle. */
-        long saved, gift, savingsTarget;
+        long saved, gift, savingsTarget, invested, toCushion;
         /** Unexpected obligations and how much of them the cushion absorbed; cushion balance -1 when not set. */
         long unexpected, covered, cushionStart = -1;
         final List<Line> lines = new ArrayList<>();
@@ -412,10 +433,15 @@ final class Budget {
             long rate = elapsed() >= 4 || averageDaily < 0 ? freeSpent / Math.max(1, elapsed()) : averageDaily;
             return available() - rate * left();
         }
-        /** Savings when the cycle closes: what was put aside plus the free money that was not spent. */
+        /**
+         * Savings when the cycle closes: what was put aside plus the free money left, or minus what was
+         * overspent. For the open cycle, at the current spending rate.
+         */
         long savingsAtClose() {
-            return savingsReserve() + Math.max(0, current ? projection() : available());
+            return Math.max(0, current ? savingsReserve() + projection() : saved + available());
         }
+        /** What the open cycle would miss of its savings target at the current rate. */
+        long shortfall() { return Math.max(0, savingsTarget - savingsAtClose()); }
         int paidLines() {
             int count = 0;
             for (Line line : lines) if (line.status == PAID || line.status == RESERVED) count++;
@@ -513,6 +539,9 @@ final class Budget {
             if (entry.unexpected) { cycle.unexpected -= entry.txn.cents; cycle.unexpectedEntries.add(entry); }
         }
         cycle.saved = Math.max(0, cycle.saved - cycle.gift);
+        cycle.invested = cycle.saved;
+        for (long[] move : settings.cushionMoves) if (period.contains((int) move[0])) cycle.toCushion += move[1];
+        cycle.saved += cycle.toCushion;
         if (settings.goal > 0) cycle.savingsTarget = settings.goal;
         else {
             List<Long> past = new ArrayList<>();
@@ -527,10 +556,12 @@ final class Budget {
             }
             cycle.savingsTarget = median(past);
         }
-        if (settings.cushionDay >= 0 && settings.cushionDay < period.end) {
-            long balance = settings.cushion, here = 0;
+        int cushionFrom = settings.cushionStart();
+        if (cushionFrom >= 0 && cushionFrom < period.end) {
+            long balance = settings.cushionDay >= 0 ? settings.cushion : 0, here = 0;
+            for (long[] move : settings.cushionMoves) if (move[0] >= cushionFrom && move[0] < period.end) balance += move[1];
             for (Entry entry : snapshot.entries) {
-                if (!entry.unexpected || entry.txn.day < settings.cushionDay) continue;
+                if (!entry.unexpected || entry.txn.day < cushionFrom) continue;
                 if (entry.txn.day < period.start) balance += entry.txn.cents;
                 else if (period.contains(entry.txn.day)) here -= entry.txn.cents;
             }
@@ -635,6 +666,25 @@ final class Budget {
     }
 
     static String skipKey(Rule rule, Period period) { return rule.id + "@" + Ledger.iso(period.start); }
+
+    /** Savings at the close of each cycle up to {@code index}, oldest first; the open one is projected. */
+    static long[] savingsHistory(Snapshot snapshot, int index, int count) {
+        int from = Math.max(snapshot.first(), index - count + 1);
+        long[] result = new long[index - from + 1];
+        for (int i = from; i <= index; i++) result[i - from] = cycle(snapshot, i).savingsAtClose();
+        return result;
+    }
+
+    /** Every movement of the cushion, newest first: {day, cents} with contributions positive and imprevistos negative. */
+    static List<long[]> cushionLedger(Snapshot snapshot) {
+        List<long[]> result = new ArrayList<>();
+        int from = snapshot.settings.cushionStart();
+        if (from < 0) return result;
+        for (long[] move : snapshot.settings.cushionMoves) if (move[0] >= from) result.add(new long[]{move[0], move[1]});
+        for (Entry entry : snapshot.entries) if (entry.unexpected && entry.txn.day >= from) result.add(new long[]{entry.txn.day, entry.txn.cents});
+        Collections.sort(result, (a, b) -> Long.compare(b[0], a[0]));
+        return result;
+    }
 
     // ------------------------------------------------------------ suggestions
 

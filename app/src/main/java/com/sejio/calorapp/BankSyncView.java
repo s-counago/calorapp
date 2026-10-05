@@ -169,7 +169,7 @@ final class BankSyncView extends PausaUi.Scroll implements TradeRepository.Liste
                 if (syncAfterLogin) {
                     // The login just completed: read right away, as the owner asked when connecting.
                     syncAfterLogin = false;
-                    run(c -> c.sync());
+                    runAll();
                     return;
                 }
                 if (connect != null) { connect.dismiss(); connect = null; }
@@ -200,7 +200,7 @@ final class BankSyncView extends PausaUi.Scroll implements TradeRepository.Liste
         if (tradeBusy) message = trade.progress().isEmpty() ? "Hablando con Trade Republic…" : trade.progress();
         else if (!tradeError.isEmpty()) { message = plain(tradeError); color = PausaUi.TERRACOTTA; }
         else if (pending) message = "Falta confirmar el acceso en la app de Trade Republic.";
-        else if (connected) message = "Sesión guardada en este teléfono: se actualiza aquí mismo, sin abrir ninguna web.";
+        else if (connected) message = "Sesión guardada en este teléfono: movimientos, posiciones y valoración se actualizan aquí mismo.";
         else message = "Conéctalo una vez con tu teléfono y PIN; después basta con un toque.";
         tradeMessage.setText(message);
         tradeMessage.setTextColor(color);
@@ -230,9 +230,16 @@ final class BankSyncView extends PausaUi.Scroll implements TradeRepository.Liste
         boolean pending = tradeView != null && tradeView.optBoolean("pending");
         String code = codeOf(tradeError);
         boolean expired = code.equals("AUTH") || code.equals("EXPIRED") || code.equals("LOGIN_ENDED");
-        if (connected && !pending && !expired) { run(c -> c.sync()); return; }
+        if (connected && !pending && !expired) { runAll(); return; }
         connect = new ConnectSheet();
         connect.show();
+    }
+
+    /** Movements, positions and valuation: everything Dinero and Cartera show. */
+    void runAll() {
+        if (tradeBusy) return;
+        requested = true;
+        trade.syncAll();
     }
 
     private void run(TradeRepository.Work work) {

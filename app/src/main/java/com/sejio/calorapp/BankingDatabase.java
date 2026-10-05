@@ -179,6 +179,19 @@ final class BankingDatabase extends SQLiteOpenHelper {
         return result;
     }
 
+    /** Every stored Trade Republic portfolio reading (positions, and quotes when valued), oldest first. */
+    synchronized JSONArray portfolios() throws Exception {
+        JSONArray result = new JSONArray();
+        try (Cursor cursor = getReadableDatabase().rawQuery("SELECT c.id,c.payload FROM captures c JOIN products p ON p.id=c.product_id "
+                + "WHERE p.bank='trade_republic' AND c.source_path='portfolio' ORDER BY c.captured_at", null)) {
+            while (cursor.moveToNext()) {
+                try { result.put(decrypt("captures", cursor.getString(0), cursor.getBlob(1)).getJSONObject("data")); }
+                catch (Exception unreadable) { /* One unreadable reading never hides the rest. */ }
+            }
+        }
+        return result;
+    }
+
     /** When the bank was last read completely; 0 if never. */
     synchronized long lastSync(String bank) {
         try (Cursor cursor = getReadableDatabase().rawQuery("SELECT MAX(COALESCE(finished_at, started_at)) FROM sync_runs WHERE status='complete' AND bank=?", new String[]{bank})) {

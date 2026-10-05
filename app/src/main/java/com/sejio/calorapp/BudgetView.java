@@ -40,21 +40,27 @@ final class BudgetView extends LinearLayout {
         JSONArray movements(Context context) throws Exception;
         /** When the bank ("abanca", "trade_republic") was last read completely; 0 if never. */
         long lastSync(Context context, String bank);
+        /** Stored Trade Republic portfolio readings, oldest first. */
+        JSONArray portfolios(Context context) throws Exception;
     }
 
     /** Replaced by instrumentation tests with a fixture; production reads the encrypted ledger. */
     static Source source = new Source() {
         @Override public JSONArray movements(Context context) throws Exception { return BankingDatabase.get(context).movements(); }
         @Override public long lastSync(Context context, String bank) { return BankingDatabase.get(context).lastSync(bank); }
+        @Override public JSONArray portfolios(Context context) throws Exception { return BankingDatabase.get(context).portfolios(); }
     };
     static int todayOverride = Integer.MIN_VALUE;
 
+    static final int MONTH = 0, MOVES = 1, PORTFOLIO = 2, BANKS = 3;
     private static final String[] FILTERS = {"Todo", "Libre", "Fijo", "Ahorro", "Imprevistos", "Entradas", "No cuenta"};
 
     private final PausaUi.Segmented tabs;
     private final View[] pages;
     private final LinearLayout month, moves;
     private final BankSyncView banking;
+    private final PortfolioView portfolio;
+    private Portfolio.View holdings;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private List<Ledger.Txn> txns;
     private Budget.Snapshot snapshot;
@@ -70,7 +76,7 @@ final class BudgetView extends LinearLayout {
         setOrientation(VERTICAL);
         LinearLayout header = new LinearLayout(context);
         header.setPadding(dp(20), dp(10), dp(20), dp(6));
-        tabs = new PausaUi.Segmented(context, new String[]{"Mes", "Movimientos", "Bancos"}, this::show);
+        tabs = new PausaUi.Segmented(context, new String[]{"Mes", "Movimientos", "Cartera", "Bancos"}, this::show);
         header.addView(tabs, new LayoutParams(-1, -2));
         addView(header, new LayoutParams(-1, -2));
         FrameLayout frame = new FrameLayout(context);
@@ -84,7 +90,11 @@ final class BudgetView extends LinearLayout {
         moves.setPadding(dp(20), dp(6), dp(20), 0);
         movesScroll.addView(moves, new FrameLayout.LayoutParams(-1, -2));
         banking = new BankSyncView(context, this::load);
-        pages = new View[]{monthScroll, movesScroll, banking};
+        portfolio = new PortfolioView(context, new PortfolioView.Host() {
+            @Override public void reload() { load(); }
+            @Override public void openBanks() { show(BANKS); }
+        });
+        pages = new View[]{monthScroll, movesScroll, portfolio, banking};
         for (View view : pages) { view.setVisibility(GONE); frame.addView(view, new FrameLayout.LayoutParams(-1, -1)); }
         show(0);
     }
@@ -92,12 +102,13 @@ final class BudgetView extends LinearLayout {
     // ------------------------------------------------------------ lifecycle
 
     void refresh() {
-        if (page == 2) banking.refresh();
+        if (page == BANKS) banking.refresh();
+        if (page == PORTFOLIO) portfolio.watch();
         load();
     }
 
     /** Leaving Dinero stops watching the Trade Republic client. */
-    void pause() { banking.stop(); }
+    void pause() { banking.stop(); portfolio.stop(); }
 
     private void show(int next) {
         if (next == page) return;
@@ -105,7 +116,8 @@ final class BudgetView extends LinearLayout {
         page = next;
         tabs.select(next, previous >= 0);
         for (int i = 0; i < pages.length; i++) pages[i].setVisibility(i == next ? VISIBLE : GONE);
-        if (next == 2) banking.refresh(); else banking.stop();
+        if (next == BANKS) banking.refresh(); else banking.stop();
+        if (next == PORTFOLIO) portfolio.watch(); else portfolio.stop();
         if (previous >= 0 && PausaUi.motion(getContext())) {
             View incoming = pages[next];
             incoming.setTranslationX(dp(next > previous ? 28 : -28)); incoming.setAlpha(0);
@@ -119,9 +131,11 @@ final class BudgetView extends LinearLayout {
         if (txns == null) loading();
         worker.execute(() -> {
             List<Ledger.Txn> loaded = null;
+            Portfolio.View readings = null;
             long trade = 0, abanca = 0;
             try {
                 loaded = Ledger.fromDatabase(source.movements(app), TimeZone.getDefault());
+                readings = Portfolio.from(source.portfolios(app));
                 trade = source.lastSync(app, "trade_republic");
                 abanca = source.lastSync(app, "abanca");
             } catch (Exception error) {
@@ -129,6 +143,7 @@ final class BudgetView extends LinearLayout {
             }
             final List<Ledger.Txn> result = loaded;
             final long t = trade, a = abanca;
+            final Portfolio.View held = readings;
             post(() -> {
                 if (version != generation) return;
                 failed = result == null;
@@ -137,7 +152,7 @@ final class BudgetView extends LinearLayout {
                     if (known >= 0 && fresh > 0 && isShown())
                         PausaUi.snack(getContext(), fresh == 1 ? "1 movimiento nuevo" : fresh + " movimientos nuevos", null, null);
                     known = result.size();
-                    txns = result; tradeSync = t; abancaSync = a;
+                    txns = result; tradeSync = t; abancaSync = a; holdings = held;
                 }
                 recompute(true);
             });
@@ -162,6 +177,7 @@ final class BudgetView extends LinearLayout {
     private void render() {
         renderMonth();
         renderMoves();
+        portfolio.show(holdings, snapshot);
         animateNext = false;
     }
 
@@ -381,7 +397,7 @@ final class BudgetView extends LinearLayout {
         row.setBackground(PausaUi.ripple(c, old ? PausaUi.PEACH_SOFT : PausaUi.CREAM_DEEP, 16));
         row.setCompoundDrawables(new PausaUi.Symbol(c, "reset", old ? PausaUi.TERRACOTTA : PausaUi.MUTED, 16), null, null, null);
         row.setCompoundDrawablePadding(dp(10));
-        row.setOnClickListener(v -> show(2));
+        row.setOnClickListener(v -> show(BANKS));
         row.setContentDescription("Los datos de " + behind + " son de " + ago(now - when) + ". Ir a actualizar");
         return row;
     }
@@ -546,15 +562,16 @@ final class BudgetView extends LinearLayout {
     private void savings(Budget.Cycle cycle) {
         Context c = getContext();
         Budget.Settings settings = snapshot.settings;
+        long atClose = cycle.savingsAtClose(), target = cycle.savingsTarget;
         LinearLayout header = new LinearLayout(c);
         header.setGravity(Gravity.BOTTOM);
-        TextView title = PausaUi.editorial(c, "Ahorro y colchón", 24);
+        TextView title = PausaUi.editorial(c, "Ahorro", 24);
         if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
         header.addView(title, new LayoutParams(0, -2, 1));
-        header.addView(PausaUi.text(c, cycle.current ? "al cerrar ≈ " + Budget.money(cycle.savingsAtClose(), false)
-                : "ahorraste " + Budget.money(cycle.savingsAtClose(), false), 13, PausaUi.GREEN, true));
+        header.addView(PausaUi.text(c, target > 0 ? "objetivo " + Budget.money(target, false) + (settings.goal > 0 ? "" : " (habitual)") : "sin objetivo", 13, PausaUi.GREEN, true));
         month.addView(header, spaced(18, 10));
 
+        // Where the cycle is heading.
         LinearLayout card = column();
         card.setBackground(PausaUi.card(c));
         card.setPadding(dp(16), dp(14), dp(14), dp(16));
@@ -563,12 +580,12 @@ final class BudgetView extends LinearLayout {
         top.addView(badge("seed", 0xFF3E6A73, 0x1F3E6A73, 40), new LayoutParams(dp(40), dp(40)));
         LinearLayout labels = column();
         labels.setPadding(dp(12), 0, dp(8), 0);
-        labels.addView(PausaUi.eyebrow(c, cycle.current ? "Apartado este ciclo" : "Apartado ese ciclo", PausaUi.MUTED), full());
-        TextView saved = PausaUi.editorial(c, Budget.money(cycle.saved), 24);
-        saved.setPadding(0, dp(4), 0, 0);
-        labels.addView(saved, full());
+        labels.addView(PausaUi.eyebrow(c, cycle.current ? "Al cerrar el ciclo, a este ritmo" : "Ahorrado ese ciclo", PausaUi.MUTED), full());
+        TextView big = PausaUi.editorial(c, Budget.money(atClose, false), 26);
+        big.setPadding(0, dp(4), 0, 0);
+        labels.addView(big, full());
         top.addView(labels, new LayoutParams(0, -2, 1));
-        TextView goal = PausaUi.text(c, settings.goal > 0 ? "Objetivo " + Budget.money(settings.goal, false) : "Poner objetivo", 13, PausaUi.GREEN, true);
+        TextView goal = PausaUi.text(c, settings.goal > 0 ? "Cambiar" : "Poner objetivo", 13, PausaUi.GREEN, true);
         goal.setGravity(Gravity.CENTER);
         goal.setMinHeight(dp(40));
         goal.setPadding(dp(12), 0, dp(12), 0);
@@ -577,59 +594,172 @@ final class BudgetView extends LinearLayout {
         goal.setOnClickListener(v -> editGoal());
         top.addView(goal);
         card.addView(top, full());
-        long target = cycle.savingsTarget;
-        if (target > 0) {
-            MoneyMeters.Share share = new MoneyMeters.Share(c, 0xFF3E6A73, Math.min(1f, cycle.savingsAtClose() / (float) target));
-            if (animateNext) share.animateIn(300);
-            card.addView(share, spaced(14, 0));
+
+        MoneyMeters.GoalBar bar = new MoneyMeters.GoalBar(c);
+        bar.set(Math.min(cycle.saved, atClose), atClose - Math.min(cycle.saved, atClose), target, animateNext);
+        card.addView(bar, spaced(14, 6));
+        String parts = "Apartado " + Budget.money(cycle.saved, false);
+        if (cycle.invested > 0 && cycle.toCushion > 0) parts += " (" + Budget.money(cycle.invested, false) + " invertido, " + Budget.money(cycle.toCushion, false) + " al colchón)";
+        else if (cycle.toCushion > 0) parts += " al colchón";
+        else if (cycle.invested > 0) parts += " en Trade Republic";
+        if (atClose > cycle.saved) parts += " · " + (cycle.current ? "lo que no gastes" : "sobró de lo libre") + " " + Budget.money(atClose - cycle.saved, false);
+        else if (atClose < cycle.saved) parts += " · gastar por encima de lo libre " + (cycle.current ? "se comería " : "se comió ")
+                + Budget.money(cycle.saved - atClose, false) + " de ese ahorro";
+        if (target > 0) parts += " · marca: objetivo";
+        TextView legend = PausaUi.text(c, parts, 12, PausaUi.MUTED, false);
+        legend.setLineSpacing(0, 1.12f);
+        card.addView(legend, full());
+
+        TextView verdict = PausaUi.text(c, "", 14, PausaUi.INK, true);
+        verdict.setLineSpacing(0, 1.12f);
+        verdict.setCompoundDrawablePadding(dp(8));
+        verdict.setGravity(Gravity.CENTER_VERTICAL);
+        String advice;
+        if (target <= 0) {
+            verdict.setText("Sin objetivo de ahorro");
+            advice = "Ponte uno: se aparta antes de calcular lo libre y Pausa te dice si llegas.";
+        } else if (!cycle.current) {
+            boolean met = atClose >= target;
+            verdict.setText(met ? "Objetivo cumplido" : "Faltaron " + Budget.money(target - atClose, false));
+            verdict.setTextColor(met ? PausaUi.SAGE : PausaUi.TERRACOTTA);
+            verdict.setCompoundDrawables(new PausaUi.Symbol(c, met ? "check" : "pulse", met ? PausaUi.SAGE : PausaUi.TERRACOTTA, 18), null, null, null);
+            advice = met ? "Ahorraste " + Budget.money(atClose, false) + " de " + Budget.money(target, false) + "." : "Lo libre se quedó corto ese ciclo.";
+        } else if (cycle.shortfall() == 0) {
+            verdict.setText("A este ritmo llegas a tu objetivo");
+            verdict.setTextColor(PausaUi.SAGE);
+            verdict.setCompoundDrawables(new PausaUi.Symbol(c, "check", PausaUi.SAGE, 18), null, null, null);
+            advice = "Mientras tu gasto libre no pase de " + Budget.money(cycle.dailyAllowance(), false) + " al día, lo apartado está a salvo.";
+        } else {
+            verdict.setText("A este ritmo te faltarían " + Budget.money(cycle.shortfall(), false));
+            verdict.setTextColor(PausaUi.TERRACOTTA);
+            verdict.setCompoundDrawables(new PausaUi.Symbol(c, "pulse", PausaUi.TERRACOTTA, 18), null, null, null);
+            advice = cycle.dailyAllowance() > 0 ? "Para llegar, gasta como mucho " + Budget.money(cycle.dailyAllowance(), false) + " al día durante los "
+                    + cycle.left() + " días que quedan." : "Lo libre de este ciclo ya se ha gastado: solo queda lo apartado.";
         }
-        String detail;
-        if (cycle.current) detail = "Con Trade Republic y lo que no gastes, cerrarías el ciclo con unos " + Budget.money(cycle.savingsAtClose(), false)
-                + (target > 0 ? (settings.goal > 0 ? " de tus " : " · sueles apartar ") + Budget.money(target, false) : "") + ".";
-        else detail = cycle.available() < 0 ? "Lo libre se quedó corto en " + Budget.money(-cycle.available(), false) + ": solo quedó lo apartado."
-                : "Lo apartado más " + Budget.money(cycle.available(), false) + " que sobraron de lo libre.";
-        TextView line = PausaUi.text(c, detail, 13, PausaUi.MUTED, false);
-        line.setLineSpacing(0, 1.12f);
-        card.addView(line, spaced(10, 0));
+        card.addView(verdict, spaced(14, 4));
+        TextView tip = PausaUi.text(c, advice, 13, PausaUi.MUTED, false);
+        tip.setLineSpacing(0, 1.12f);
+        card.addView(tip, full());
         if (cycle.gift > 0) {
             TextView gift = PausaUi.text(c, "+" + Budget.money(cycle.gift) + " de saveback: Trade Republic lo invierte y no sale de tu dinero", 12, PausaUi.SAGE, true);
             gift.setCompoundDrawables(new PausaUi.Symbol(c, "gift", PausaUi.SAGE, 16), null, null, null);
             gift.setCompoundDrawablePadding(dp(6));
             card.addView(gift, spaced(10, 0));
         }
-        if (!cycle.savingEntries.isEmpty()) card.setOnClickListener(v -> listSheet("Ahorro", Budget.money(cycle.saved) + " apartados este ciclo", cycle.savingEntries));
+        if (!cycle.savingEntries.isEmpty()) card.setOnClickListener(v -> listSheet("Ahorro", Budget.money(cycle.invested) + " invertidos este ciclo", cycle.savingEntries));
         month.addView(card, spaced(0, 10));
 
-        LinearLayout cushion = new LinearLayout(c);
-        cushion.setGravity(Gravity.CENTER_VERTICAL);
-        cushion.setBackground(PausaUi.ripple(c, PausaUi.CREAM_DEEP, 22));
-        cushion.setPadding(dp(14), dp(14), dp(16), dp(14));
-        cushion.addView(badge("umbrella", PausaUi.TERRACOTTA, PausaUi.PEACH_SOFT, 40), new LayoutParams(dp(40), dp(40)));
-        LinearLayout text = column();
-        text.setPadding(dp(14), 0, 0, 0);
-        text.addView(PausaUi.eyebrow(c, "Colchón para imprevistos", PausaUi.TERRACOTTA), full());
-        boolean set = cycle.cushionStart >= 0;
-        TextView value = PausaUi.editorial(c, set ? Budget.money(cycle.cushionLeft(), false) : "Sin indicar", 20);
-        value.setPadding(0, dp(4), 0, dp(2));
-        text.addView(value, full());
-        String note = !set ? "Dime cuánto tienes apartado para lo que no se repite"
-                : cycle.unexpected > 0 ? "Este ciclo: " + Budget.money(cycle.unexpected, false) + " en imprevistos"
-                : "Sin imprevistos este ciclo";
-        text.addView(PausaUi.text(c, note, 12, PausaUi.MUTED, false), full());
-        cushion.addView(text, new LayoutParams(0, -2, 1));
-        cushion.setOnClickListener(v -> editCushion(cycle));
-        cushion.setContentDescription("Colchón para imprevistos: " + value.getText() + ". " + note + ". Cambiar");
-        month.addView(cushion, spaced(0, 10));
+        // The rhythm across cycles.
+        long[] history = Budget.savingsHistory(snapshot, cycle.index, 6);
+        if (history.length > 1) {
+            LinearLayout rhythm = column();
+            rhythm.setBackground(PausaUi.card(c));
+            rhythm.setPadding(dp(16), dp(14), dp(16), dp(14));
+            long sum = 0;
+            for (int i = 0; i < history.length - (cycle.current ? 1 : 0); i++) sum += history[i];
+            LinearLayout line = new LinearLayout(c);
+            line.addView(PausaUi.text(c, "Ahorro por ciclo", 14, PausaUi.INK, true), new LayoutParams(0, -2, 1));
+            line.addView(PausaUi.text(c, Budget.money(sum, false) + " en ciclos cerrados", 12, PausaUi.MUTED, false));
+            rhythm.addView(line, full());
+            String[] names = new String[history.length];
+            int from = cycle.index - history.length + 1;
+            for (int i = 0; i < history.length; i++)
+                names[i] = cycle.current && i == history.length - 1 ? "ahora" : Budget.MONTHS[Ledger.civil(snapshot.periods.get(from + i).start + 15)[1] - 1];
+            MoneyMeters.HistoryBars bars = new MoneyMeters.HistoryBars(c);
+            bars.set(history, names, 0xFF3E6A73);
+            bars.setContentDescription("Ahorro de los últimos ciclos");
+            rhythm.addView(bars, spaced(6, 0));
+            month.addView(rhythm, spaced(0, 10));
+        }
+        if (holdings != null && !holdings.empty() && holdings.value > 0) {
+            boolean up = holdings.gain() >= 0;
+            View link = settingRow("Cartera", Budget.money(holdings.value, false) + " · " + Portfolio.percent(holdings.gainRatio()), () -> show(PORTFOLIO));
+            ((TextView) ((LinearLayout) link).getChildAt(1)).setTextColor(up ? PausaUi.SAGE : PausaUi.TERRACOTTA);
+            link.setContentDescription("Cartera: " + Budget.money(holdings.value, false) + ", " + Portfolio.percent(holdings.gainRatio()) + ". Abrir");
+            month.addView(link, spaced(0, 4));
+        }
+        cushion(cycle);
+    }
 
-        if (cycle.unexpectedEntries.isEmpty()) {
-            month.addView(note("¿Algo obligatorio que no se repite, como el coche o el dentista? Márcalo como imprevisto desde Movimientos."), spaced(0, 4));
+    /** The cushion: money already set aside for obligations that don't repeat, and what came in and out of it. */
+    private void cushion(Budget.Cycle cycle) {
+        Context c = getContext();
+        Budget.Settings settings = snapshot.settings;
+        boolean set = cycle.cushionStart >= 0;
+        LinearLayout header = new LinearLayout(c);
+        header.setGravity(Gravity.BOTTOM);
+        TextView title = PausaUi.editorial(c, "Colchón", 24);
+        if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
+        header.addView(title, new LayoutParams(0, -2, 1));
+        if (set) header.addView(PausaUi.text(c, Budget.money(cycle.cushionLeft(), false) + (settings.cushionGoal > 0 ? " de " + Budget.money(settings.cushionGoal, false) : ""), 13, PausaUi.GREEN, true));
+        month.addView(header, spaced(18, 10));
+
+        LinearLayout card = column();
+        card.setBackground(PausaUi.surface(c, PausaUi.CREAM_DEEP, 22));
+        card.setPadding(dp(16), dp(14), dp(14), dp(14));
+        LinearLayout top = new LinearLayout(c);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(badge("umbrella", PausaUi.TERRACOTTA, PausaUi.PEACH_SOFT, 40), new LayoutParams(dp(40), dp(40)));
+        TextView explain = PausaUi.text(c, "Dinero apartado para lo obligatorio que no se repite: el coche, el dentista. Los imprevistos salen de aquí, "
+                + "no de tu día a día. Lo que añades cuenta como ahorro del ciclo.", 13, PausaUi.MUTED, false);
+        explain.setLineSpacing(0, 1.15f);
+        explain.setPadding(dp(12), 0, 0, 0);
+        top.addView(explain, new LayoutParams(0, -2, 1));
+        card.addView(top, full());
+        if (!set) {
+            Button start = PausaUi.action(c, "Empezar mi colchón", true, () -> editCushion(cycle));
+            card.addView(start, spaced(14, 0));
+            month.addView(card, spaced(0, 4));
             return;
         }
-        LinearLayout list = column();
-        list.setBackground(PausaUi.card(c));
-        list.setPadding(dp(6), dp(4), dp(6), dp(4));
-        for (Budget.Entry entry : cycle.unexpectedEntries) list.addView(entryRow(entry, () -> classify(entry)), full());
-        month.addView(list, spaced(0, 4));
+        TextView balance = PausaUi.editorial(c, Budget.money(cycle.cushionLeft(), false), 26);
+        balance.setPadding(0, dp(14), 0, 0);
+        card.addView(balance, full());
+        if (settings.cushionGoal > 0) {
+            MoneyMeters.Share share = new MoneyMeters.Share(c, PausaUi.TERRACOTTA, Math.min(1f, cycle.cushionLeft() / (float) settings.cushionGoal));
+            if (animateNext) share.animateIn(300);
+            card.addView(share, spaced(10, 4));
+            long missing = settings.cushionGoal - cycle.cushionLeft();
+            card.addView(PausaUi.text(c, missing > 0 ? "Faltan " + Budget.money(missing, false) + " para tu objetivo de " + Budget.money(settings.cushionGoal, false)
+                    : "Objetivo de " + Budget.money(settings.cushionGoal, false) + " cubierto", 12, PausaUi.MUTED, false), full());
+        }
+        Flow actions = new Flow(c);
+        actions.addView(option("Añadir dinero", "plus", PausaUi.GREEN, false, this::addToCushion));
+        actions.addView(option("Cambiar saldo", "edit", PausaUi.GREEN, false, () -> editCushion(cycle)));
+        actions.addView(option(settings.cushionGoal > 0 ? "Objetivo" : "Poner objetivo", "spark", PausaUi.GREEN, false, this::editCushionGoal));
+        card.addView(actions, spaced(14, 4));
+
+        // Recent comings and goings.
+        List<Object[]> moves = new ArrayList<>();
+        int from = settings.cushionStart();
+        for (long[] move : settings.cushionMoves) if (move[0] >= from) moves.add(new Object[]{(int) move[0], move[1], "Añadido al colchón", null});
+        for (Budget.Entry entry : snapshot.entries)
+            if (entry.unexpected && entry.txn.day >= from) moves.add(new Object[]{entry.txn.day, entry.txn.cents, entry.note != null ? entry.note : entry.label(), entry});
+        java.util.Collections.sort(moves, (a, b) -> Integer.compare((Integer) b[0], (Integer) a[0]));
+        if (moves.isEmpty()) {
+            card.addView(note("¿Algo obligatorio que no se repite? Márcalo como imprevisto desde Movimientos y saldrá de aquí."), spaced(8, 0));
+        } else {
+            card.addView(PausaUi.eyebrow(c, "Últimos movimientos del colchón", PausaUi.MUTED), spaced(10, 4));
+            for (int i = 0; i < Math.min(5, moves.size()); i++) {
+                Object[] move = moves.get(i);
+                long cents = (Long) move[1];
+                LinearLayout row = new LinearLayout(c);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setMinimumHeight(dp(40));
+                row.setPadding(dp(4), 0, dp(4), 0);
+                TextView label = PausaUi.text(c, Budget.date((Integer) move[0]) + " · " + move[2], 14, PausaUi.INK, false);
+                label.setSingleLine(true); label.setEllipsize(TextUtils.TruncateAt.END);
+                row.addView(label, new LayoutParams(0, -2, 1));
+                row.addView(PausaUi.text(c, (cents > 0 ? "+" : "") + Budget.money(cents), 14, cents > 0 ? PausaUi.SAGE : PausaUi.TERRACOTTA, true));
+                if (move[3] != null) {
+                    Budget.Entry entry = (Budget.Entry) move[3];
+                    row.setBackground(PausaUi.ripple(c, Color.TRANSPARENT, 12));
+                    row.setOnClickListener(v -> classify(entry));
+                }
+                card.addView(row, full());
+            }
+        }
+        month.addView(card, spaced(0, 4));
     }
 
     private void editGoal() {
@@ -639,16 +769,30 @@ final class BudgetView extends LinearLayout {
                 value -> change(value == 0 ? "Sin objetivo de ahorro" : "Objetivo: " + Budget.money(value * 100L, false) + " por ciclo", s -> s.goal = value * 100L));
     }
 
+    /** Sets what the cushion holds today, counting from this cycle's start. */
     private void editCushion(Budget.Cycle cycle) {
-        long left = Math.max(0, cycle.cushionLeft());
-        int start = snapshot.periods.get(snapshot.last()).start;
-        long spentHere = Budget.cycle(snapshot, snapshot.last()).unexpected;
-        PausaUi.numberSheet(getContext(), "Colchón para imprevistos", "Lo que tienes apartado hoy para gastos obligatorios que no se repiten. "
+        Budget.Cycle open = Budget.cycle(snapshot, snapshot.last());
+        long left = Math.max(0, open.cushionLeft());
+        int start = open.period.start;
+        long spentHere = open.unexpected, addedHere = open.toCushion;
+        PausaUi.numberSheet(getContext(), "Saldo del colchón", "Lo que tienes apartado hoy para gastos obligatorios que no se repiten. "
                         + "Los imprevistos que marques lo irán gastando.", (int) (left / 100), 0, "Introduce euros enteros",
                 value -> change("Colchón: " + Budget.money(value * 100L, false), s -> {
-                    // Counted from this cycle's start, so imprevistos already marked here come out of it.
-                    s.cushion = value * 100L + spentHere; s.cushionDay = start;
+                    // Counted from this cycle's start: imprevistos and contributions already here stay in the picture.
+                    s.cushion = value * 100L + spentHere - addedHere; s.cushionDay = start;
                 }));
+    }
+
+    private void addToCushion() {
+        PausaUi.numberSheet(getContext(), "Añadir al colchón", "Euros que acabas de apartar para imprevistos. Cuentan como ahorro de este ciclo.",
+                -1, 1, "Introduce euros enteros", value -> change("+" + Budget.money(value * 100L, false) + " al colchón",
+                        s -> s.cushionMoves.add(new long[]{today(), value * 100L})));
+    }
+
+    private void editCushionGoal() {
+        PausaUi.numberSheet(getContext(), "Objetivo del colchón", "Cuánto quieres tener apartado para imprevistos. Con 0, sin objetivo.",
+                (int) (snapshot.settings.cushionGoal / 100), 0, "Introduce euros enteros",
+                value -> change(value == 0 ? "Colchón sin objetivo" : "Objetivo del colchón: " + Budget.money(value * 100L, false), s -> s.cushionGoal = value * 100L));
     }
 
     private void unexpectedSheet(Budget.Entry entry) {
@@ -755,13 +899,23 @@ final class BudgetView extends LinearLayout {
 
     private void fixed(Budget.Cycle cycle) {
         Context c = getContext();
+        android.content.SharedPreferences ui = c.getSharedPreferences("budget_ui", Context.MODE_PRIVATE);
+        boolean collapsed = ui.getBoolean("fixed_collapsed", false);
         LinearLayout header = new LinearLayout(c);
-        header.setGravity(Gravity.BOTTOM);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setMinimumHeight(dp(48));
+        header.setBackground(PausaUi.ripple(c, Color.TRANSPARENT, 16));
         TextView title = PausaUi.editorial(c, "Lo fijo", 24);
         if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
         header.addView(title, new LayoutParams(0, -2, 1));
         header.addView(PausaUi.text(c, cycle.paidLines() + " de " + cycle.activeLines() + " pagados", 13, PausaUi.GREEN, true));
-        month.addView(header, spaced(16, 4));
+        ImageView chevron = new ImageView(c);
+        chevron.setImageDrawable(new PausaUi.Symbol(c, "down", PausaUi.GREEN, 18));
+        chevron.setRotation(collapsed ? 0 : 180);
+        LayoutParams cp = new LayoutParams(dp(28), dp(28));
+        cp.leftMargin = dp(6);
+        header.addView(chevron, cp);
+        month.addView(header, spaced(12, 0));
         String reserved = Budget.money(cycle.fixed(), false) + " reservados";
         if (cycle.fixedPending > 0) reserved += " · faltan " + Budget.money(cycle.fixedPending, false);
         month.addView(PausaUi.text(c, reserved, 13, PausaUi.MUTED, false), spaced(0, 10));
@@ -770,6 +924,16 @@ final class BudgetView extends LinearLayout {
         for (int i = 0; i < statuses.length; i++) statuses[i] = cycle.lines.get(i).status;
         dots.set(statuses, animateNext);
         month.addView(dots, spaced(0, 12));
+        Budget.Line next = null;
+        for (Budget.Line line : cycle.lines) if (!line.done() && (next == null || line.due < next.due)) next = line;
+        View nextRow = null;
+        if (next != null && cycle.current) {
+            final Budget.Line upcoming = next;
+            nextRow = settingRow("Próximo: " + next.rule.name, Budget.money(next.expected) + " · " + pill(next).toLowerCase(PausaUi.SPANISH),
+                    () -> lineSheet(cycle, upcoming));
+            nextRow.setVisibility(collapsed ? VISIBLE : GONE);
+            month.addView(nextRow, spaced(0, 8));
+        }
 
         LinearLayout grid = column();
         LinearLayout row = null;
@@ -788,6 +952,19 @@ final class BudgetView extends LinearLayout {
         }
         if (tiles.size() % 2 == 1) row.addView(new View(c), withLeft(new LayoutParams(0, 1, 1), 10));
         month.addView(grid, spaced(0, 8));
+        grid.setVisibility(collapsed ? GONE : VISIBLE);
+        final View summary = nextRow;
+        header.setContentDescription(collapsed ? "Mostrar todos los pagos fijos" : "Encoger los pagos fijos");
+        header.setOnClickListener(v -> {
+            boolean fold = grid.getVisibility() == VISIBLE;
+            ui.edit().putBoolean("fixed_collapsed", fold).apply();
+            grid.setVisibility(fold ? GONE : VISIBLE);
+            if (summary != null) summary.setVisibility(fold ? VISIBLE : GONE);
+            header.setContentDescription(fold ? "Mostrar todos los pagos fijos" : "Encoger los pagos fijos");
+            if (PausaUi.motion(c)) chevron.animate().rotation(fold ? 0 : 180).setDuration(260).setInterpolator(PausaUi.EASE).start();
+            else chevron.setRotation(fold ? 0 : 180);
+            if (!fold) PausaUi.stagger(grid, 8);
+        });
     }
 
     private static LayoutParams withLeft(LayoutParams p, int margin) { p.leftMargin = margin; return p; }
@@ -1151,7 +1328,7 @@ final class BudgetView extends LinearLayout {
         text.setGravity(Gravity.CENTER);
         text.setLineSpacing(0, 1.2f);
         month.addView(text, spaced(14, 0));
-        Button sync = PausaUi.quiet(c, "Sincronizar bancos", PausaUi.GREEN, () -> show(2));
+        Button sync = PausaUi.quiet(c, "Sincronizar bancos", PausaUi.GREEN, () -> show(BANKS));
         month.addView(sync, new LayoutParams(-1, dp(48)));
     }
 
@@ -1183,7 +1360,7 @@ final class BudgetView extends LinearLayout {
         hint.setGravity(Gravity.CENTER);
         hint.setLineSpacing(0, 1.15f);
         empty.addView(hint, full());
-        Button go = PausaUi.action(c, "Ir a Bancos", true, () -> show(2));
+        Button go = PausaUi.action(c, "Ir a Bancos", true, () -> show(BANKS));
         LayoutParams p = new LayoutParams(-2, dp(48));
         p.topMargin = dp(16);
         empty.addView(go, p);

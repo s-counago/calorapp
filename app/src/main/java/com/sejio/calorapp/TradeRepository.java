@@ -56,6 +56,18 @@ final class TradeRepository {
         });
     }
 
+    /** Movements, positions and their valuation in one request. A recent valuation still refreshes positions. */
+    void syncAll() {
+        execute(client -> {
+            client.sync();
+            try { client.syncValuation(); }
+            catch (TradeException cooldown) {
+                if (!"QUOTE_COOLDOWN".equals(cooldown.code)) throw cooldown;
+                client.syncPortfolio();
+            }
+        });
+    }
+
     void forget() {
         submit(() -> {
             // Recovery also works when an unreadable vault prevented client construction.

@@ -51,6 +51,7 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             JSONArray rows = fixture.exists() ? new JSONArray(new String(Files.readAllBytes(fixture.toPath()), StandardCharsets.UTF_8)) : synthetic();
             BudgetView.source = new BudgetView.Source() {
                 @Override public JSONArray movements(Context c) { return rows; }
+                @Override public JSONArray portfolios(Context c) throws Exception { return syntheticPortfolio(); }
                 @Override public long lastSync(Context c, String bank) {
                     return System.currentTimeMillis() - (bank.equals("abanca") ? 50 : 2) * 3_600_000L;
                 }
@@ -145,8 +146,30 @@ public final class BudgetUiSmokeTest extends Instrumentation {
                 unsecure();
             }
 
+            tap("Cartera", false);
+            SystemClock.sleep(1500);
+            unsecure();
+            check(findContains("Valor estimado") != null || findContains("VALOR ESTIMADO") != null, "portfolio shows its value");
+            capture("budget-17-cartera.png");
+            AccessibilityNodeInfo sp = findContains("Core S&P 500");
+            check(sp != null, "holdings are listed");
+            tapNode(sp);
+            capture("budget-18-posicion.png");
+            pressBack();
+            unsecure();
+
             tap("Mes", false);
             SystemClock.sleep(500);
+            AccessibilityNodeInfo fold = findContains("Encoger los pagos fijos");
+            check(fold != null, "fixed lines can be folded");
+            tapNode(fold);
+            check(context.getSharedPreferences("budget_ui", 0).getBoolean("fixed_collapsed", false), "folding is remembered");
+            capture("budget-19-fijo-encogido.png");
+            scrollBy(700); capture("budget-20-ahorro.png");
+            scrollBy(800); capture("budget-21-colchon.png");
+            context.getSharedPreferences("budget_ui", 0).edit().clear().commit();
+            runOnMainSync(() -> { View s = findScroll(activity.getWindow().getDecorView()); if (s != null) s.scrollTo(0, 0); });
+            settle();
             tap("Ciclo anterior", true);
             SystemClock.sleep(900);
             unsecure();
@@ -224,6 +247,25 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             }
         }
         return rows;
+    }
+
+    /** Six valuations over three months: an S&P 500 plan that grows and an IBEX fund that dips. */
+    private static JSONArray syntheticPortfolio() throws Exception {
+        JSONArray readings = new JSONArray();
+        long day = 86_400_000L, start = Ledger.parseIso("2026-07-10") * day;
+        double[] sp = {560, 571, 566, 584, 597, 603}, ibex = {470, 462, 475, 468, 455, 459};
+        for (int i = 0; i < sp.length; i++) {
+            long at = start + i * 17 * day;
+            JSONArray positions = new JSONArray()
+                    .put(new JSONObject().put("instrumentId", "IE00B5BMR087").put("name", "Core S&P 500 USD (Acc)").put("quantity", String.valueOf(2 + i * 0.1))
+                            .put("averageBuyIn", "548.20").put("currency", "").put("valuationStatus", "VALUED")
+                            .put("quote", new JSONObject().put("price", String.valueOf(sp[i])).put("currency", "EUR")))
+                    .put(new JSONObject().put("instrumentId", "FR0010655746").put("name", "Amundi IBEX 35 (Acc)").put("quantity", String.valueOf(0.4 + i * 0.012))
+                            .put("averageBuyIn", "466.10").put("currency", "").put("valuationStatus", "VALUED")
+                            .put("quote", new JSONObject().put("price", String.valueOf(ibex[i])).put("currency", "EUR")));
+            readings.put(new JSONObject().put("capturedAt", at).put("valuationAt", at).put("positions", positions));
+        }
+        return readings;
     }
 
     private static String decimal(int euros) { return String.format(Locale.ROOT, "-%d.%02d", euros, (euros * 37) % 100); }

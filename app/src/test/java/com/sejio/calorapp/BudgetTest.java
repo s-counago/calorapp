@@ -351,6 +351,43 @@ public final class BudgetTest {
         assertEquals(Budget.PAID, line(Budget.cycle(later, snapshot.last()), "pareja").status);
     }
 
+    @Test public void moneyPutIntoTheCushionIsSavedAndCoversImprevistos() throws Exception {
+        typicalMonths();
+        account("2026-10-03", "-340.00", "TALLER MECANICO PEREZ");
+        List<Ledger.Txn> txns = Ledger.fromDatabase(rows, MADRID);
+        Budget.Settings settings = Budget.Settings.defaults();
+        for (Ledger.Txn txn : txns) if (txn.merchant.startsWith("Taller")) settings.txn.put(txn.id, "unexpected");
+        settings.cushionMoves.add(new long[]{day("2026-10-01"), 40_000});
+        Budget.Snapshot snapshot = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Cycle cycle = Budget.cycle(snapshot, snapshot.last());
+        assertEquals(40_000, cycle.toCushion);
+        assertEquals(846 + 40_000, cycle.saved);
+        assertEquals(34_000, cycle.covered);
+        assertEquals(6_000, cycle.cushionLeft());
+        List<long[]> ledger = Budget.cushionLedger(snapshot);
+        assertEquals(2, ledger.size());
+        assertEquals(-34_000, ledger.get(0)[1]);
+        Budget.Settings copy = Budget.Settings.fromJson(new JSONObject(settings.toJson().toString()));
+        assertEquals(40_000, copy.cushionMoves.get(0)[1]);
+    }
+
+    @Test public void theSavingsVerdictFollowsTheSpendingPace() throws Exception {
+        typicalMonths();
+        Budget.Settings settings = Budget.Settings.defaults();
+        settings.goal = 20_000;
+        Budget.Snapshot calm = Budget.snapshot(Ledger.fromDatabase(rows, MADRID), settings, day("2026-10-05"));
+        Budget.Cycle cycle = Budget.cycle(calm, calm.last());
+        assertEquals(0, cycle.shortfall());
+        trade("2026-10-05T10:00:00Z", "card_successful_transaction", "-900.00", "WWW.AMAZON");
+        Budget.Snapshot spender = Budget.snapshot(Ledger.fromDatabase(rows, MADRID), settings, day("2026-10-05"));
+        Budget.Cycle fast = Budget.cycle(spender, spender.last());
+        assertTrue(fast.shortfall() > 0);
+        assertEquals(Math.max(0, fast.savingsReserve() + fast.projection()), fast.savingsAtClose());
+        long[] history = Budget.savingsHistory(spender, spender.last(), 6);
+        assertEquals(spender.last() - spender.first() + 1, history.length);
+        assertEquals(fast.savingsAtClose(), history[history.length - 1]);
+    }
+
     private static Budget.Line line(Budget.Cycle cycle, String id) {
         for (Budget.Line line : cycle.lines) if (line.rule.id.equals(id)) return line;
         throw new AssertionError("Missing line " + id);

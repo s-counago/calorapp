@@ -369,6 +369,151 @@ final class MoneyMeters {
         }
     }
 
+    /**
+     * Value over time against what was put in: a sunlit line with a soft fill above a dashed cost line.
+     * Touching it selects the nearest reading. Time is spaced by date, not by reading.
+     */
+    static final class ValueChart extends View {
+        interface Listener { void select(int index); }
+        private final Paint value = new Paint(Paint.ANTI_ALIAS_FLAG), cost = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint area = new Paint(Paint.ANTI_ALIAS_FLAG), dot = new Paint(Paint.ANTI_ALIAS_FLAG), ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path line = new Path(), fill = new Path(), costLine = new Path();
+        private long[] at = new long[0], values = new long[0], costs = new long[0];
+        private int selected = -1;
+        private float reveal = 1;
+        private Listener listener;
+
+        ValueChart(Context c, int valueColor, int costColor, int dotFill) {
+            super(c);
+            value.setStyle(Paint.Style.STROKE); value.setStrokeWidth(PausaUi.dp(c, 2.4f)); value.setColor(valueColor);
+            value.setStrokeCap(Paint.Cap.ROUND); value.setStrokeJoin(Paint.Join.ROUND);
+            cost.setStyle(Paint.Style.STROKE); cost.setStrokeWidth(PausaUi.dp(c, 1.4f)); cost.setColor(costColor);
+            cost.setPathEffect(new DashPathEffect(new float[]{PausaUi.dp(c, 4), PausaUi.dp(c, 4)}, 0));
+            area.setStyle(Paint.Style.FILL);
+            dot.setColor(dotFill);
+            ring.setStyle(Paint.Style.STROKE); ring.setStrokeWidth(PausaUi.dp(c, 2.4f)); ring.setColor(valueColor);
+            setClickable(true);
+        }
+
+        void setListener(Listener listener) { this.listener = listener; }
+
+        void set(long[] at, long[] values, long[] costs, boolean animate) {
+            this.at = at; this.values = values; this.costs = costs; selected = values.length - 1;
+            if (!animate || !PausaUi.motion(getContext())) { reveal = 1; invalidate(); return; }
+            ValueAnimator a = ValueAnimator.ofFloat(0, 1);
+            a.setDuration(1000); a.setStartDelay(150); a.setInterpolator(PausaUi.EASE);
+            a.addUpdateListener(v -> { reveal = (Float) v.getAnimatedValue(); invalidate(); });
+            reveal = 0; a.start();
+        }
+
+        @Override protected void onMeasure(int w, int h) {
+            setMeasuredDimension(MeasureSpec.getSize(w), PausaUi.dp(getContext(), 120));
+        }
+
+        private float x(int i) {
+            float pad = PausaUi.dp(getContext(), 8);
+            if (at.length < 2 || at[at.length - 1] == at[0]) return at.length < 2 ? getWidth() / 2f : pad;
+            return pad + (getWidth() - 2 * pad) * (at[i] - at[0]) / (float) (at[at.length - 1] - at[0]);
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            if (values.length == 0) return false;
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
+                if (action == MotionEvent.ACTION_DOWN && getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                int best = 0;
+                for (int i = 1; i < values.length; i++) if (Math.abs(x(i) - event.getX()) < Math.abs(x(best) - event.getX())) best = i;
+                if (best != selected) { selected = best; performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK); invalidate(); if (listener != null) listener.select(best); }
+                if (action == MotionEvent.ACTION_UP) performClick();
+            }
+            return true;
+        }
+
+        @Override public boolean performClick() { return super.performClick(); }
+
+        @Override protected void onDraw(Canvas canvas) {
+            int n = values.length;
+            if (n == 0) return;
+            Context c = getContext();
+            float top = PausaUi.dp(c, 12), bottom = getHeight() - PausaUi.dp(c, 10);
+            long min = Long.MAX_VALUE, max = Long.MIN_VALUE;
+            for (int i = 0; i < n; i++) { min = Math.min(min, Math.min(values[i], costs[i])); max = Math.max(max, Math.max(values[i], costs[i])); }
+            long span = Math.max(1, max - min);
+            min -= span / 6; max += span / 6; span = max - min;
+            line.reset(); fill.reset(); costLine.reset();
+            for (int i = 0; i < n; i++) {
+                float px = x(i), vy = bottom - (bottom - top) * (values[i] - min) / span, cy = bottom - (bottom - top) * (costs[i] - min) / span;
+                if (i == 0) { line.moveTo(px, vy); fill.moveTo(px, bottom); fill.lineTo(px, vy); costLine.moveTo(px, cy); }
+                else { line.lineTo(px, vy); fill.lineTo(px, vy); costLine.lineTo(px, cy); }
+            }
+            fill.lineTo(x(n - 1), bottom); fill.close();
+            canvas.save();
+            canvas.clipRect(0, 0, getWidth() * reveal, getHeight());
+            area.setShader(new LinearGradient(0, top, 0, bottom, (value.getColor() & 0x00FFFFFF) | 0x40000000, value.getColor() & 0x00FFFFFF, Shader.TileMode.CLAMP));
+            canvas.drawPath(fill, area);
+            canvas.drawPath(costLine, cost);
+            canvas.drawPath(line, value);
+            canvas.restore();
+            if (n == 1) canvas.drawCircle(x(0), bottom - (bottom - top) * (values[0] - min) / span, PausaUi.dp(c, 3), ring);
+            if (selected >= 0 && reveal > .95f) {
+                float px = x(selected), vy = bottom - (bottom - top) * (values[selected] - min) / span;
+                canvas.drawCircle(px, vy, PausaUi.dp(c, 6), dot);
+                canvas.drawCircle(px, vy, PausaUi.dp(c, 6), ring);
+            }
+        }
+    }
+
+    /** Savings towards a goal: what is set aside, what the free money would add, and a tick at the goal. */
+    static final class GoalBar extends View {
+        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG), tick = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private final Path clip = new Path();
+        private long set, more, goal;
+        private float reveal = 1;
+
+        GoalBar(Context c) {
+            super(c);
+            track.setColor(PausaUi.NEUTRAL);
+            tick.setColor(PausaUi.INK); tick.setStrokeWidth(PausaUi.dp(c, 2)); tick.setStrokeCap(Paint.Cap.ROUND);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        void set(long set, long more, long goal, boolean animate) {
+            this.set = Math.max(0, set); this.more = Math.max(0, more); this.goal = Math.max(0, goal);
+            if (!animate || !PausaUi.motion(getContext())) { reveal = 1; invalidate(); return; }
+            ValueAnimator a = ValueAnimator.ofFloat(0, 1);
+            a.setDuration(900); a.setStartDelay(200); a.setInterpolator(PausaUi.EASE);
+            a.addUpdateListener(v -> { reveal = (Float) v.getAnimatedValue(); invalidate(); });
+            reveal = 0; a.start();
+        }
+
+        @Override protected void onMeasure(int w, int h) {
+            setMeasuredDimension(MeasureSpec.getSize(w), PausaUi.dp(getContext(), 22));
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            Context c = getContext();
+            float height = PausaUi.dp(c, 12), top = (getHeight() - height) / 2f, r = height / 2;
+            rect.set(0, top, getWidth(), top + height);
+            canvas.drawRoundRect(rect, r, r, track);
+            long total = Math.max(1, Math.max(goal * 6 / 5, set + more));
+            float unit = getWidth() / (float) total;
+            clip.reset(); clip.addRoundRect(rect, r, r, Path.Direction.CW);
+            canvas.save();
+            canvas.clipPath(clip);
+            canvas.clipRect(0, 0, getWidth() * reveal, getHeight());
+            fill.setColor(0xFF3E6A73);
+            canvas.drawRect(0, top, set * unit, top + height, fill);
+            fill.setColor(SAVE_TONE);
+            canvas.drawRect(set * unit, top, (set + more) * unit, top + height, fill);
+            canvas.restore();
+            if (goal > 0) {
+                float x = Math.min(getWidth() - tick.getStrokeWidth(), goal * unit);
+                canvas.drawLine(x, PausaUi.dp(c, 1), x, getHeight() - PausaUi.dp(c, 1), tick);
+            }
+        }
+    }
+
     /** Thin share bar used by the category list. */
     static final class Share extends View {
         private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG);
