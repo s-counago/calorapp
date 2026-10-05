@@ -28,12 +28,13 @@ final class Ledger {
         final int valueDay;
         Kind kind;
         String category;
-        boolean salary, duplicate;
+        /** reward: money the bank gives back (Trade Republic saveback), later invested on the owner's behalf. */
+        boolean salary, duplicate, reward;
 
         Txn(String id, String bank, String source, String sourceLabel, int day, int valueDay, long cents, String raw, Kind kind, String category) {
             this.id = id; this.bank = bank; this.source = source; this.sourceLabel = sourceLabel;
-            this.day = day; this.valueDay = valueDay; this.cents = cents; this.raw = raw;
-            this.merchant = pretty(raw); this.merchantKey = key(merchant);
+            this.day = day; this.valueDay = valueDay; this.cents = cents; this.raw = repair(raw);
+            this.merchant = pretty(this.raw); this.merchantKey = key(merchant);
             this.kind = kind; this.category = category;
         }
 
@@ -130,6 +131,7 @@ final class Ledger {
             String title = data.optString("description", data.optString("title"));
             Kind kind = tradeKind(data.optString("eventType"), data.optString("status"), data.optString("subtitle"), cents);
             Txn txn = new Txn(id, bank, "trade", "Trade Republic", day, day, cents, title, kind, null);
+            txn.reward = cents > 0 && data.optString("eventType").toLowerCase(Locale.ROOT).contains("saveback");
             txn.category = kind == Kind.SPEND && data.optString("eventType").toLowerCase(Locale.ROOT).contains("atm") ? "efectivo" : guessCategory(txn.haystack());
             return txn;
         }
@@ -214,6 +216,24 @@ final class Ledger {
     }
 
     // ------------------------------------------------------------ text
+
+    /** ABANCA writes Ñ as ` or as an unknown character (CAMI`O, CORU�A); put it back between letters. */
+    static String repair(String raw) {
+        if (raw == null) return "";
+        return raw.replaceAll("(?<=\\p{L})[`\\uFFFD?](?=\\p{L})", "Ñ");
+    }
+
+    /** Character-trigram overlap of two merchant keys, 0..1. Spaces and digits are ignored. */
+    static double similarity(String a, String b) {
+        String x = a.replaceAll("[^A-Z]", ""), y = b.replaceAll("[^A-Z]", "");
+        if (x.length() < 3 || y.length() < 3) return x.equals(y) ? 1 : 0;
+        java.util.Set<String> one = new java.util.HashSet<>(), two = new java.util.HashSet<>();
+        for (int i = 0; i + 3 <= x.length(); i++) one.add(x.substring(i, i + 3));
+        for (int i = 0; i + 3 <= y.length(); i++) two.add(y.substring(i, i + 3));
+        int shared = 0;
+        for (String gram : one) if (two.contains(gram)) shared++;
+        return shared / (double) (one.size() + two.size() - shared);
+    }
 
     static String key(String value) {
         if (value == null) return "";

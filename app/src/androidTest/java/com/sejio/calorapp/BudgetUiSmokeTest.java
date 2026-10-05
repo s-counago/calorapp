@@ -62,9 +62,20 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             check(find("Lo fijo", false) != null, "fixed section present");
             capture("budget-01-mes.png");
             render("budget-00-mes-completo.png");
+            AccessibilityNodeInfo inbox = findContains("Por revisar:");
+            check(inbox != null, "review inbox is offered");
+            tapNode(inbox);
+            capture("budget-09-por-revisar.png");
+            tap("Entre mis cuentas", false);
+            SystemClock.sleep(700);
+            check(BudgetStore.load(context).merchant.containsValue("transfer"), "inbox answers are remembered");
+            capture("budget-10-por-revisar-respondido.png");
+            pressBack();
+            unsecure();
             scrollBy(900); capture("budget-02-fijo.png");
-            scrollBy(900); capture("budget-03-dia-a-dia.png");
-            scrollBy(1100); capture("budget-04-categorias.png");
+            scrollBy(900); capture("budget-03-fijo-2.png");
+            scrollBy(900); capture("budget-11-ahorro.png");
+            scrollBy(1000); capture("budget-04-dia-a-dia.png");
 
             AccessibilityNodeInfo rent = findContains("Alquiler y casa,");
             check(rent != null, "rent tile present");
@@ -87,6 +98,16 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             check(settings.merchant.containsValue("cat:tabaco"), "teaching a merchant is saved");
             tap("Deshacer", false);
             check(!BudgetStore.load(context).merchant.containsValue("cat:tabaco"), "undo restores the previous settings");
+
+            coffee = findContains("A Crucena,");
+            if (coffee == null) coffee = findContains("Cafés y bares");
+            tapNode(coffee);
+            AccessibilityNodeInfo page = findContains("Ficha de «");
+            check(page != null, "classify links to the merchant page");
+            tapNode(page);
+            capture("budget-12-ficha.png");
+            pressBack();
+            unsecure();
 
             tap("Mes", false);
             SystemClock.sleep(500);
@@ -119,6 +140,10 @@ public final class BudgetUiSmokeTest extends Instrumentation {
         int[] counter = {0};
         String[] paydays = {"2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30"};
         for (String payday : paydays) account(rows, counter, payday, "1408.25", "EMPRESA DEMO SL NOMINA");
+        account(rows, counter, "2026-08-05", "-20.19", "00SSAN031813 CONFEDERACION INTERSINDICAL GALEGA");
+        account(rows, counter, "2026-10-03", "-340.00", "TALLER MECANICO PEREZ");
+        account(rows, counter, "2026-10-01", "250.00", "Sergio Enviada desde Revolut");
+        card(rows, counter, "2026-09-14", "-6.80", "ESTANCO CAMI`O NOV");
         for (int month = 6; month <= 10; month++) {
             String m = String.format(Locale.ROOT, "2026-%02d-", month);
             if (month >= 7) {

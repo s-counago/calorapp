@@ -405,7 +405,8 @@ final class PausaUi {
             scroller = new ScrollView(c);
             scroller.setVerticalScrollBarEnabled(false);
             scroller.addView(body, new ScrollView.LayoutParams(-1, -2));
-            panel.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
+            // Weighted so a long body scrolls and yields room: the footer added below always stays on screen.
+            panel.addView(scroller, new LinearLayout.LayoutParams(-1, -2, 1));
             dialog.setContentView(panel);
         }
 
@@ -898,6 +899,9 @@ final class PausaUi {
                     line(c,3,7.5f,12,3,21,7.5f,21,16.5f,12,21,3,16.5f,3,7.5f); line(c,3,7.5f,12,12,21,7.5f); line(c,12,12,12,21); break;
                 case "music":
                     line(c,9,18,9,5,20,3,20,16); c.drawCircle(6.5f,18,2.5f,p); c.drawCircle(17.5f,16,2.5f,p); break;
+                case "umbrella":
+                    c.drawArc(3,3.5f,21,21.5f,180,180,false,p); line(c,3,12.5f,21,12.5f); line(c,12,12.5f,12,19);
+                    c.drawArc(8,16.5f,12,21,0,180,false,p); line(c,12,2,12,3.5f); break;
                 case "in": line(c,12,4,12,20); line(c,6,14,12,20,18,14); break;
                 case "out": line(c,12,20,12,4); line(c,6,10,12,4,18,10); break;
                 case "transfer": line(c,4,9,20,9); line(c,16,5,20,9,16,13); line(c,20,15,4,15); line(c,8,11,4,15,8,19); break;

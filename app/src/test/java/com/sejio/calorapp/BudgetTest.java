@@ -136,7 +136,7 @@ public final class BudgetTest {
         Budget.Cycle cycle = Budget.cycle(snapshot, snapshot.last());
         assertTrue(cycle.current);
         assertEquals(140825, cycle.income());
-        Budget.Line rent = line(cycle, "alquiler"), couple = line(cycle, "pareja"), netflix = line(cycle, "netflix"), invest = line(cycle, "inversion");
+        Budget.Line rent = line(cycle, "alquiler"), couple = line(cycle, "pareja"), netflix = line(cycle, "netflix");
         assertEquals(Budget.PAID, rent.status);
         assertEquals(2853, rent.paid);
         assertEquals(24262, rent.expected); // Median of the last two rents.
@@ -144,13 +144,14 @@ public final class BudgetTest {
         assertEquals(Budget.UPCOMING, netflix.status);
         assertEquals(1499, netflix.expected);
         assertEquals(day("2026-10-10"), netflix.due); // Learned: ten days after payday.
-        assertEquals(Budget.PARTIAL, invest.status);
+        assertEquals(846, cycle.saved); // Investing is savings, not a fixed line.
+        assertEquals(846, cycle.savingsReserve());
         assertEquals(Budget.PAID, line(cycle, "gimnasio").status);
         // Transfers to Trade Republic, card repayments and inbound transfers are not spending.
         assertEquals(770 + 540, cycle.freeSpent);
         assertNotNull(cycle.habit);
         assertEquals(3, cycle.habit.count);
-        assertEquals(cycle.income() - cycle.fixed() - cycle.freeSpent, cycle.available());
+        assertEquals(cycle.income() - cycle.fixed() - cycle.savingsReserve() - cycle.freeSpent, cycle.available());
         assertTrue(cycle.fixedPending > 0);
     }
 
@@ -211,6 +212,120 @@ public final class BudgetTest {
         assertEquals(day("2026-10-01"), cycle.period.start);
         assertEquals(300, cycle.freeSpent);
         assertFalse(cycle.salaryEstimated);
+    }
+
+    @Test public void quarterlyChargesAreSetAsideEveryCycle() throws Exception {
+        typicalMonths();
+        account("2026-08-05", "-20.19", "00SSAN031813 CONFEDERACION INTERSINDICAL GALEGA");
+        Budget.Snapshot snapshot = Budget.snapshot(Ledger.fromDatabase(rows, MADRID), Budget.Settings.defaults(), day("2026-10-05"));
+        Budget.Line cig = line(Budget.cycle(snapshot, snapshot.last()), "cig");
+        assertEquals(Budget.RESERVED, cig.status);
+        assertEquals(2019, cig.expected);
+        assertEquals(673, cig.reserve());
+        assertEquals(day("2026-11-05"), cig.due);
+        Budget.Snapshot november = Budget.snapshot(Ledger.fromDatabase(rows, MADRID), Budget.Settings.defaults(), day("2026-11-10"));
+        assertEquals(Budget.LATE, line(Budget.cycle(november, november.last()), "cig").status);
+    }
+
+    @Test public void unexpectedCostsComeFromTheCushionFirst() throws Exception {
+        typicalMonths();
+        account("2026-10-03", "-340.00", "TALLER MECANICO PEREZ");
+        List<Ledger.Txn> txns = Ledger.fromDatabase(rows, MADRID);
+        Budget.Settings settings = Budget.Settings.defaults();
+        Ledger.Txn repair = null;
+        for (Ledger.Txn txn : txns) if (txn.merchant.startsWith("Taller")) repair = txn;
+        settings.txn.put(repair.id, "unexpected");
+        settings.notes.put(repair.id, "Reparación coche");
+        Budget.Snapshot first = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Cycle uncovered = Budget.cycle(first, first.last());
+        assertEquals(34000, uncovered.unexpected);
+        assertEquals(34000, uncovered.uncovered());
+        assertEquals(770 + 540, uncovered.freeSpent); // Not mixed with free spending.
+        settings.cushion = 50000; settings.cushionDay = day("2026-09-01");
+        Budget.Snapshot second = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Cycle covered = Budget.cycle(second, second.last());
+        assertEquals(34000, covered.covered);
+        assertEquals(16000, covered.cushionLeft());
+        assertEquals(uncovered.available() + 34000, covered.available());
+        assertEquals("Reparación coche", covered.unexpectedEntries.get(0).note);
+    }
+
+    @Test public void aSavingsGoalIsReservedUpFront() throws Exception {
+        typicalMonths();
+        Budget.Settings settings = Budget.Settings.defaults();
+        settings.goal = 15000;
+        Budget.Snapshot snapshot = Budget.snapshot(Ledger.fromDatabase(rows, MADRID), settings, day("2026-10-05"));
+        Budget.Cycle cycle = Budget.cycle(snapshot, snapshot.last());
+        assertEquals(15000, cycle.savingsReserve());
+        assertEquals(cycle.income() - cycle.fixed() - 15000, cycle.freeBudget());
+        assertTrue(cycle.savingsAtClose() >= 15000);
+    }
+
+    @Test public void merchantsCanBeRenamedAndMerged() throws Exception {
+        card("2026-09-12", "FRA. VENTA", "-10.20", "ESTANCO CAMI`O NOV\\SANTIA");
+        trade("2026-09-14T10:00:00Z", "card_successful_transaction", "-6.80", "ESTANCO CAMINO NOVO");
+        trade("2026-09-15T10:00:00Z", "card_successful_transaction", "-6.80", "ESTANCO AURORA");
+        List<Ledger.Txn> txns = Ledger.fromDatabase(rows, MADRID);
+        Budget.Settings settings = Budget.Settings.defaults();
+        Budget.Snapshot before = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Merchant spelled = Budget.merchants(before).get("ESTANCO CAMINO NOV");
+        assertNotNull(spelled);
+        assertEquals("Estanco Camiño Nov", spelled.name);
+        List<Budget.Merchant> alike = Budget.lookalikes(before, "ESTANCO CAMINO NOVO", .35);
+        assertEquals("ESTANCO CAMINO NOV", alike.get(0).key);
+        boolean merge = false;
+        for (Budget.Review item : Budget.review(before)) merge |= item.type == Budget.REVIEW_MERGE;
+        assertTrue(merge);
+        settings.names.put("ESTANCO CAMINO NOVO", "Estanco Camino Novo");
+        settings.merge("ESTANCO CAMINO NOVO", "ESTANCO CAMINO NOV");
+        settings.merchant.put("ESTANCO CAMINO NOVO", "cat:regalos");
+        Budget.Snapshot after = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Merchant unified = Budget.merchants(after).get("ESTANCO CAMINO NOVO");
+        assertEquals(2, unified.count());
+        assertEquals(1700, unified.spent);
+        for (Budget.Entry entry : after.entries) if (entry.merchantKey.equals("ESTANCO CAMINO NOVO")) {
+            assertEquals("Estanco Camino Novo", entry.merchant);
+            assertEquals("regalos", entry.category);
+        }
+        settings.split("ESTANCO CAMINO NOV");
+        assertEquals(1, Budget.merchants(Budget.snapshot(txns, settings, day("2026-10-05"))).get("ESTANCO CAMINO NOVO").count());
+    }
+
+    @Test public void theInboxOnlyHoldsWhatIsUnclear() throws Exception {
+        typicalMonths();
+        account("2026-10-03", "-340.00", "TALLER MECANICO PEREZ");
+        account("2026-10-03", "-16.00", "RETRO");
+        account("2026-10-01", "300.00", "Sergio Enviada desde Revolut");
+        List<Ledger.Txn> txns = Ledger.fromDatabase(rows, MADRID);
+        Budget.Settings settings = Budget.Settings.defaults();
+        List<Budget.Review> items = Budget.review(Budget.snapshot(txns, settings, day("2026-10-05")));
+        assertEquals(Budget.REVIEW_INFLOW, items.get(0).type);
+        int big = 0, unknown = 0;
+        for (Budget.Review item : items) { if (item.type == Budget.REVIEW_BIG) big++; if (item.type == Budget.REVIEW_UNKNOWN) unknown++; }
+        assertEquals(1, big);
+        assertEquals(1, unknown);
+        for (Budget.Review item : items) if (item.entry != null) settings.reviewed.add(item.entry.txn.id);
+        for (Budget.Review item : Budget.review(Budget.snapshot(txns, settings, day("2026-10-05")))) assertNull(item.entry);
+    }
+
+    @Test public void versionOneSettingsUpgrade() throws Exception {
+        JSONObject old = new JSONObject().put("version", 1).put("rules", new JSONArray()
+                .put(new JSONObject().put("id", "google").put("name", "Google Play").put("symbol", "spark").put("expected", 649).put("min", 550).put("max", 750))
+                .put(new JSONObject().put("id", "inversion").put("name", "Plan de inversión").put("invest", true).put("expected", 7200)))
+                .put("txn", new JSONObject().put("x", "rule:inversion").put("y", "cat:cafe"));
+        Budget.Settings settings = Budget.Settings.fromJson(old);
+        assertEquals("Spotify", settings.rule("google").name);
+        assertNull(settings.rule("inversion"));
+        assertEquals(3, settings.rule("cig").frequency);
+        assertFalse(settings.txn.containsKey("x"));
+        assertEquals("cat:cafe", settings.txn.get("y"));
+        assertEquals(Budget.VERSION, settings.toJson().getInt("version"));
+    }
+
+    @Test public void abancaSpellingIsRepaired() {
+        assertEquals("ESTANCO CAMIÑO NOV", Ledger.repair("ESTANCO CAMI`O NOV"));
+        assertEquals("A CORUÑA", Ledger.repair("A CORU�A"));
+        assertEquals("NOMINA 06?2026", Ledger.repair("NOMINA 06?2026"));
     }
 
     private static Budget.Line line(Budget.Cycle cycle, String id) {

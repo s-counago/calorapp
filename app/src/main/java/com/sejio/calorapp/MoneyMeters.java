@@ -10,7 +10,7 @@ import android.view.View;
 final class MoneyMeters {
     private MoneyMeters() { }
 
-    static final int PAID_TONE = 0xFFB9CBB0, SPENT_TONE = 0xFFE89A74, OVER_TONE = 0xFFF2A07B;
+    static final int PAID_TONE = 0xFFB9CBB0, SPENT_TONE = 0xFFE89A74, OVER_TONE = 0xFFF2A07B, SAVE_TONE = 0xFF9DBDC4;
 
     /**
      * The payroll as a capsule of light: fixed lines already paid, fixed lines still to come (striped),
@@ -21,7 +21,7 @@ final class MoneyMeters {
         private final Paint stripe = new Paint(Paint.ANTI_ALIAS_FLAG), mark = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path clip = new Path(), marker = new Path();
         private final RectF bar = new RectF();
-        private long income, paid, pending, spent, pace = -1;
+        private long income, paid, pending, savings, spent, pace = -1;
         private float reveal = 1;
         private ValueAnimator animator;
 
@@ -33,8 +33,9 @@ final class MoneyMeters {
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         }
 
-        void set(long income, long paid, long pending, long spent, long pace, boolean animate) {
+        void set(long income, long paid, long pending, long savings, long spent, long pace, boolean animate) {
             this.income = Math.max(0, income); this.paid = Math.max(0, paid); this.pending = Math.max(0, pending);
+            this.savings = Math.max(0, savings);
             this.spent = Math.max(0, spent); this.pace = pace;
             if (animator != null) animator.cancel();
             if (!animate || !PausaUi.motion(getContext())) { reveal = 1; invalidate(); return; }
@@ -54,7 +55,7 @@ final class MoneyMeters {
             bar.set(0, top, getWidth(), top + height);
             float radius = height / 2;
             canvas.drawRoundRect(bar, radius, radius, track);
-            long total = Math.max(income, paid + pending + spent);
+            long total = Math.max(income, paid + pending + savings + spent);
             if (total <= 0) return;
             float width = getWidth(), unit = width / total;
             float limit = width * reveal;
@@ -76,12 +77,15 @@ final class MoneyMeters {
                 canvas.restore();
                 x = end;
             }
-            fill.setColor(paid + pending + spent > income ? OVER_TONE : SPENT_TONE);
+            fill.setColor(SAVE_TONE);
+            canvas.drawRect(x, bar.top, x + savings * unit, bar.bottom, fill);
+            x += savings * unit;
+            fill.setColor(paid + pending + savings + spent > income ? OVER_TONE : SPENT_TONE);
             canvas.drawRect(x, bar.top, x + spent * unit, bar.bottom, fill);
             // Hairline seams keep the segments legible without a legend.
             fill.setColor(PausaUi.NIGHT);
             float seam = PausaUi.dp(c, 1.5f);
-            for (float edge : new float[]{paid * unit, (paid + pending) * unit, (paid + pending + spent) * unit})
+            for (float edge : new float[]{paid * unit, (paid + pending) * unit, (paid + pending + savings) * unit, (paid + pending + savings + spent) * unit})
                 if (edge > 0 && edge < width - 1) canvas.drawRect(edge - seam / 2, bar.top, edge + seam / 2, bar.bottom, fill);
             canvas.restore();
             if (total > income && income > 0 && reveal > .98f) {
@@ -90,7 +94,7 @@ final class MoneyMeters {
                 canvas.drawLine(at, bar.top - PausaUi.dp(c, 4), at, bar.bottom + PausaUi.dp(c, 4), mark);
             }
             if (pace >= 0 && reveal > .6f) {
-                float at = Math.min(width - PausaUi.dp(c, 4), Math.max(PausaUi.dp(c, 4), (paid + pending + pace) * unit));
+                float at = Math.min(width - PausaUi.dp(c, 4), Math.max(PausaUi.dp(c, 4), (paid + pending + savings + pace) * unit));
                 float size = PausaUi.dp(c, 5);
                 marker.reset();
                 marker.moveTo(at - size, top - PausaUi.dp(c, 9)); marker.lineTo(at + size, top - PausaUi.dp(c, 9));
@@ -249,6 +253,12 @@ final class MoneyMeters {
                 paint.setStyle(Paint.Style.FILL);
                 paint.setColor(PausaUi.NEUTRAL);
                 canvas.drawRoundRect(rect, r, r, paint);
+                if (status == Budget.RESERVED) {
+                    paint.setColor(PausaUi.blend(PausaUi.SAGE, PausaUi.NEUTRAL, .5f));
+                    rect.set(x, 0, x + width * visible, h);
+                    if (rect.width() > 0) canvas.drawRoundRect(rect, r, r, paint);
+                    continue;
+                }
                 int color = status == Budget.PAID ? PausaUi.SAGE : status == Budget.LATE ? PausaUi.TERRACOTTA
                         : status == Budget.SOON || status == Budget.PARTIAL ? PausaUi.SUN : -1;
                 if (color == -1) continue;
