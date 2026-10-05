@@ -179,8 +179,9 @@ final class BankingDatabase extends SQLiteOpenHelper {
         return result;
     }
 
-    synchronized long lastSync() {
-        try (Cursor cursor = getReadableDatabase().rawQuery("SELECT MAX(COALESCE(finished_at, started_at)) FROM sync_runs WHERE status='complete'", null)) {
+    /** When the bank was last read completely; 0 if never. */
+    synchronized long lastSync(String bank) {
+        try (Cursor cursor = getReadableDatabase().rawQuery("SELECT MAX(COALESCE(finished_at, started_at)) FROM sync_runs WHERE status='complete' AND bank=?", new String[]{bank})) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 0;
         }
     }

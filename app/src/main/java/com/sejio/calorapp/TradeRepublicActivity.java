@@ -41,7 +41,7 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
         repository = TradeRepository.get(this);
         LinearLayout root = column(); root.setPadding(dp(20), dp(14), dp(20), dp(20)); root.setBackgroundColor(PausaUi.CREAM);
         ScrollView scroll = new PausaUi.Scroll(this); scroll.addView(root); setContentView(scroll);
-        root.addView(PausaUi.quiet(this, "Volver a Banca", PausaUi.GREEN, this::finish));
+        root.addView(PausaUi.quiet(this, "Volver", PausaUi.GREEN, this::finish));
         root.addView(PausaUi.editorial(this, "Trade Republic", 28));
         root.addView(label("Conexión directa · prueba", true));
         status = label("Cargando la sesión del teléfono…", false); root.addView(status);

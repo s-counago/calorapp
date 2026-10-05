@@ -32,6 +32,11 @@ final class AbancaSyncController {
         this.context = context.getApplicationContext(); this.web = web; this.reader = reader; this.links = links; this.host = host;
     }
     boolean isActive() { return active; }
+    /** Waiting for the owner to finish the bank's login, before any reading. */
+    boolean isWaitingForLogin() { return active && waitingLogin; }
+    /** Products read so far and planned in this pass; 0 of 0 until the summary is recognised. */
+    int step() { return plan == null ? 0 : Math.max(0, index - 1); }
+    int steps() { return plan == null ? 0 : plan.targets.size(); }
     boolean isCommitting() { return committing; }
 
     void request() {
@@ -135,7 +140,7 @@ final class AbancaSyncController {
                 active = false; committing = false; generation++;
                 expected = null; current = null; plan = null;
                 host.update(true, true, ok ? "Lectura terminada: " + saved + " páginas guardadas en la base de datos."
-                        + (skipped > 0 ? " Algunos productos no se incluyeron." : "") + " Puedes verlas en Banca → Ver sincronizaciones."
+                        + (skipped > 0 ? " Algunos productos no se incluyeron." : "") + " Ya puedes volver a Dinero."
                         : "Las páginas leídas están guardadas, pero no se pudo marcar la consulta como terminada.");
             });
         });

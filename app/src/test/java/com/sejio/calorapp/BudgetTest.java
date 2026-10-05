@@ -328,6 +328,29 @@ public final class BudgetTest {
         assertEquals("NOMINA 06?2026", Ledger.repair("NOMINA 06?2026"));
     }
 
+    @Test public void aFixedLineCanCarryAnAmountForOneCycle() throws Exception {
+        typicalMonths();
+        List<Ledger.Txn> txns = Ledger.fromDatabase(rows, MADRID);
+        Budget.Settings settings = Budget.Settings.defaults();
+        settings.planned.put("pareja@2026-09-30", 55_000L);
+        settings.planned.put("netflix@2026-09-30", 2_000L);
+        Budget.Snapshot snapshot = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Cycle cycle = Budget.cycle(snapshot, snapshot.last());
+        Budget.Line couple = line(cycle, "pareja"), netflix = line(cycle, "netflix");
+        assertTrue(couple.planned);
+        assertEquals(Budget.PARTIAL, couple.status); // 500 paid of 550 planned: the other 50 stay reserved.
+        assertEquals(55_000, couple.committed());
+        assertEquals(2_000, netflix.expected);
+        assertEquals(Budget.UPCOMING, netflix.status);
+        assertEquals(java.util.Arrays.asList(57_000L, 50_000L), Budget.usualAmounts(couple));
+        Budget.Settings copy = Budget.Settings.fromJson(new JSONObject(settings.toJson().toString()));
+        assertEquals(Long.valueOf(55_000), copy.planned.get("pareja@2026-09-30"));
+        // Closed cycles are what they were.
+        account("2026-10-30", "1408.25", "EMPRESA SL NOMINA");
+        Budget.Snapshot later = Budget.snapshot(Ledger.fromDatabase(rows, MADRID), settings, day("2026-11-05"));
+        assertEquals(Budget.PAID, line(Budget.cycle(later, snapshot.last()), "pareja").status);
+    }
+
     private static Budget.Line line(Budget.Cycle cycle, String id) {
         for (Budget.Line line : cycle.lines) if (line.rule.id.equals(id)) return line;
         throw new AssertionError("Missing line " + id);

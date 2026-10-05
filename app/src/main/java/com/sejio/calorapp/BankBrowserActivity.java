@@ -53,9 +53,13 @@ public final class BankBrowserActivity extends Activity {
     private boolean desktopHints;
     private AbancaSyncController abancaSync;
     private String linksScript;
-    private Button syncButton, syncCancel, viewSaved;
+    private Button syncButton, syncCancel, viewSaved, coverDone;
     private LinearLayout syncCover;
-    private TextView syncProgress;
+    private TextView syncProgress, coverTitle;
+    private android.widget.ImageView coverIcon;
+    private MoneyMeters.Working coverBar;
+    private static final String[] STEPS = {"Accede", "Leemos", "Listo"};
+    private final TextView[] stepViews = new TextView[STEPS.length];
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -70,30 +74,66 @@ public final class BankBrowserActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(PausaUi.CREAM);
-        root.setPadding(dp(12), dp(8), dp(12), dp(8));
-        root.addView(PausaUi.editorial(this, bank.label, 25));
-        origin = PausaUi.text(this, "", 12, PausaUi.GREEN, true);
-        root.addView(origin);
-        status = PausaUi.text(this, "Inicia sesión en la web del banco si te lo pide. Después abre el resumen o los movimientos.", 13, PausaUi.MUTED, false);
-        status.setPadding(0, dp(6), 0, dp(6));
-        root.addView(status);
+        root.setPadding(dp(8), dp(6), dp(8), dp(10));
+
+        // A slim bar: back, the bank and where the page comes from, home and help.
+        LinearLayout bar = new LinearLayout(this);
+        bar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        bar.addView(PausaUi.iconButton(this, "back", "Volver", PausaUi.INK, this::finish), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.setPadding(dp(4), 0, 0, 0);
+        titles.addView(PausaUi.editorial(this, bank.label, 22));
+        origin = PausaUi.text(this, "", 12, PausaUi.SAGE, true);
+        origin.setCompoundDrawables(new PausaUi.Symbol(this, "shield", PausaUi.SAGE, 13), null, null, null);
+        origin.setCompoundDrawablePadding(dp(4));
+        origin.setPadding(0, dp(3), 0, 0);
+        titles.addView(origin);
+        bar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
+        bar.addView(PausaUi.iconButton(this, "home", "Inicio del banco", PausaUi.INK, () -> {
+            if (browser != null) browser.loadUrl(bank.home);
+        }), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        bar.addView(PausaUi.iconButton(this, "info", "Ayuda", PausaUi.INK, this::help), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        root.addView(bar, new LinearLayout.LayoutParams(-1, -2));
+
+        // What is happening, in three steps, above the bank's own page.
+        LinearLayout guide = new LinearLayout(this);
+        guide.setOrientation(LinearLayout.VERTICAL);
+        guide.setBackground(PausaUi.surface(this, PausaUi.SUN_SOFT, 18));
+        guide.setPadding(dp(14), dp(10), dp(14), dp(12));
+        if (bank == BankProvider.ABANCA) {
+            LinearLayout steps = new LinearLayout(this);
+            for (int i = 0; i < STEPS.length; i++) {
+                TextView step = PausaUi.text(this, (i + 1) + "  " + STEPS[i], 12, PausaUi.MUTED, true);
+                step.setGravity(android.view.Gravity.CENTER);
+                step.setPadding(dp(6), dp(5), dp(6), dp(5));
+                stepViews[i] = step;
+                LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(0, -2, 1);
+                if (i > 0) sp.leftMargin = dp(6);
+                steps.addView(step, sp);
+            }
+            guide.addView(steps, new LinearLayout.LayoutParams(-1, -2));
+        }
+        status = PausaUi.text(this, bank == BankProvider.ABANCA ? "Entra con tus claves en la web de ABANCA. En cuanto aparezca tu posición global, Pausa empieza a leer sola."
+                : "Inicia sesión en la web del banco si te lo pide. Después abre el resumen o los movimientos.", 13, PausaUi.INK, false);
+        status.setLineSpacing(0, 1.12f);
+        status.setPadding(dp(2), dp(bank == BankProvider.ABANCA ? 8 : 0), dp(2), 0);
+        guide.addView(status);
+        LinearLayout.LayoutParams gp = new LinearLayout.LayoutParams(-1, -2);
+        gp.topMargin = dp(4); gp.leftMargin = dp(4); gp.rightMargin = dp(4);
+        root.addView(guide, gp);
+
         capture = PausaUi.action(this, "Guardar datos de esta página", true, this::capture);
         capture.setEnabled(false);
         if (bank == BankProvider.ABANCA) capture.setVisibility(View.GONE);
         root.addView(capture, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout actions = new LinearLayout(this);
-        actions.addView(PausaUi.quiet(this, "Volver", PausaUi.GREEN, this::finish), new LinearLayout.LayoutParams(0, -2, 1));
-        actions.addView(PausaUi.quiet(this, "Inicio", PausaUi.GREEN, () -> {
-            if (browser != null) browser.loadUrl(bank.home);
-        }), new LinearLayout.LayoutParams(0, -2, 1));
-        actions.addView(PausaUi.quiet(this, "Ayuda", PausaUi.GREEN, this::help), new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(actions);
         if (bank == BankProvider.ABANCA) {
-            syncButton = PausaUi.action(this, "Sincronizar productos", true, () -> {
+            syncButton = PausaUi.quiet(this, "Leer mis productos ahora", PausaUi.GREEN, () -> {
                 if (abancaSync == null) return;
                 if (abancaSync.isActive()) abancaSync.cancel(); else abancaSync.request();
             });
-            syncButton.setEnabled(false); root.addView(syncButton);
+            syncButton.setEnabled(false);
+            root.addView(syncButton, new LinearLayout.LayoutParams(-1, dp(48)));
         }
         if (bank == BankProvider.TRADE_REPUBLIC) {
             LinearLayout testActions = new LinearLayout(this);
@@ -105,9 +145,21 @@ public final class BankBrowserActivity extends Activity {
         }
         browserFrame = new FrameLayout(this);
         browserFrame.setClipChildren(true);
-        root.addView(browserFrame, new LinearLayout.LayoutParams(-1, 0, 1));
+        // The bank's page sits in a rounded window, so it reads as a guest inside Pausa.
+        browserFrame.setBackground(PausaUi.card(this));
+        browserFrame.setClipToOutline(true);
+        LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(-1, 0, 1);
+        fp.topMargin = dp(8); fp.leftMargin = dp(4); fp.rightMargin = dp(4);
+        root.addView(browserFrame, fp);
         browserFrame.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> layoutBrowser());
         setContentView(root);
+        // Android 15 draws behind the system bars: keep the bar and the bank's page clear of them.
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int top = insets.getSystemWindowInsetTop(), bottom = insets.getSystemWindowInsetBottom();
+            view.setPadding(dp(8) + insets.getSystemWindowInsetLeft(), top + dp(6), dp(8) + insets.getSystemWindowInsetRight(), bottom + dp(10));
+            return insets;
+        });
+        root.requestApplyInsets();
 
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             status.setText("Actualiza Android System WebView y Chrome para usar sesiones separadas. No se utilizará el perfil de Renfe.");
@@ -202,25 +254,71 @@ public final class BankBrowserActivity extends Activity {
 
     private void prepareSync() {
         syncCover = new LinearLayout(this); syncCover.setOrientation(LinearLayout.VERTICAL);
-        syncCover.setGravity(android.view.Gravity.CENTER); syncCover.setPadding(dp(24), dp(24), dp(24), dp(24));
-        syncCover.setBackgroundColor(PausaUi.CREAM); syncCover.setClickable(true); syncCover.setVisibility(View.GONE);
-        syncProgress = PausaUi.text(this, "", 17, PausaUi.INK, true); syncCover.addView(syncProgress);
-        syncCancel = PausaUi.quiet(this, "Mostrar web y detener", PausaUi.GREEN, () -> {
+        syncCover.setGravity(android.view.Gravity.CENTER); syncCover.setPadding(dp(28), dp(28), dp(28), dp(28));
+        syncCover.setBackgroundColor(PausaUi.SURFACE); syncCover.setClickable(true); syncCover.setVisibility(View.GONE);
+        coverIcon = new android.widget.ImageView(this);
+        coverIcon.setScaleType(android.widget.ImageView.ScaleType.CENTER);
+        coverIcon.setImageDrawable(new PausaUi.Symbol(this, "bank", PausaUi.GREEN, 40));
+        coverIcon.setBackground(PausaUi.surface(this, PausaUi.SAGE_SOFT, 42));
+        syncCover.addView(coverIcon, new LinearLayout.LayoutParams(dp(84), dp(84)));
+        coverTitle = PausaUi.editorial(this, "Leyendo tus productos", 26);
+        coverTitle.setGravity(android.view.Gravity.CENTER);
+        coverTitle.setPadding(0, dp(18), 0, dp(14));
+        syncCover.addView(coverTitle, new LinearLayout.LayoutParams(-1, -2));
+        coverBar = new MoneyMeters.Working(this, PausaUi.NEUTRAL, PausaUi.SAGE);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(dp(220), -2);
+        syncCover.addView(coverBar, bp);
+        syncProgress = PausaUi.text(this, "", 14, PausaUi.MUTED, false);
+        syncProgress.setGravity(android.view.Gravity.CENTER);
+        syncProgress.setLineSpacing(0, 1.15f);
+        syncProgress.setPadding(0, dp(14), 0, dp(18));
+        syncCover.addView(syncProgress, new LinearLayout.LayoutParams(-1, -2));
+        coverDone = PausaUi.action(this, "Volver a Dinero", true, this::finish);
+        syncCover.addView(coverDone, new LinearLayout.LayoutParams(-2, dp(52)));
+        viewSaved = PausaUi.quiet(this, "Ver lecturas guardadas", PausaUi.GREEN, () -> startActivity(new Intent(this, AbancaArchiveActivity.class)));
+        syncCover.addView(viewSaved, new LinearLayout.LayoutParams(-2, dp(48)));
+        syncCancel = PausaUi.quiet(this, "Mostrar la web y detener", PausaUi.MUTED, () -> {
             if (abancaSync != null && abancaSync.isActive()) abancaSync.cancel();
             else { syncCover.setVisibility(View.GONE); capture.setEnabled(!loadFailed && browser != null && bank.allows(browser.getUrl())); }
-        }); syncCover.addView(syncCancel);
-        viewSaved = PausaUi.action(this, "Ver datos guardados", true, () -> startActivity(new Intent(this, AbancaArchiveActivity.class)));
-        syncCover.addView(viewSaved); browserFrame.addView(syncCover, new FrameLayout.LayoutParams(-1, -1));
+        }); syncCover.addView(syncCancel, new LinearLayout.LayoutParams(-2, dp(48)));
+        browserFrame.addView(syncCover, new FrameLayout.LayoutParams(-1, -1));
         abancaSync = new AbancaSyncController(this, browser, readerScript, linksScript, (cover, cancellable, message) -> {
             if (isFinishing() || isDestroyed()) return;
-            status.setText(message); syncProgress.setText(message); syncCover.setVisibility(cover ? View.VISIBLE : View.GONE);
             boolean active = abancaSync != null && abancaSync.isActive();
-            syncButton.setText(active ? "Detener sincronización" : "Sincronizar productos"); syncButton.setEnabled(cancellable);
-            syncCancel.setEnabled(cancellable); syncCancel.setText(active ? "Mostrar web y detener" : "Mostrar web");
-            viewSaved.setEnabled(!active);
+            boolean waiting = abancaSync != null && abancaSync.isWaitingForLogin();
+            boolean done = cover && !active && cancellable;
+            status.setText(waiting ? "Entra con tus claves y completa la verificación de ABANCA. En cuanto aparezca tu posición global, Pausa empieza a leer sola."
+                    : done ? "Lectura terminada. Puedes volver a Dinero." : message);
+            syncProgress.setText(message);
+            if (cover && syncCover.getVisibility() != View.VISIBLE) PausaUi.rise(syncCover, 0);
+            syncCover.setVisibility(cover ? View.VISIBLE : View.GONE);
+            int steps = abancaSync == null ? 0 : abancaSync.steps();
+            coverBar.set(done ? 1f : steps > 0 ? abancaSync.step() / (float) steps : -1f);
+            coverTitle.setText(done ? "Listo" : "Leyendo tus productos");
+            coverIcon.setImageDrawable(new PausaUi.Symbol(this, done ? "check" : "bank", PausaUi.GREEN, 40));
+            if (done) PausaUi.pop(coverIcon);
+            coverDone.setVisibility(done ? View.VISIBLE : View.GONE);
+            viewSaved.setVisibility(done ? View.VISIBLE : View.GONE);
+            syncCancel.setVisibility(done ? View.GONE : View.VISIBLE);
+            syncCancel.setEnabled(cancellable);
+            markStep(waiting || !active && !done ? 0 : done ? 2 : 1);
+            syncButton.setText(active ? "Detener la lectura" : "Leer mis productos ahora");
+            syncButton.setEnabled(cancellable);
+            syncButton.setVisibility(waiting || cover ? View.GONE : View.VISIBLE);
             capture.setEnabled(!cover && !active && !reading && !loadFailed && browser != null && bank.allows(browser.getUrl()));
         });
         syncButton.setEnabled(true);
+        markStep(0);
+    }
+
+    private void markStep(int current) {
+        for (int i = 0; i < stepViews.length; i++) {
+            if (stepViews[i] == null) continue;
+            boolean on = i == current, past = i < current;
+            stepViews[i].setTextColor(on ? PausaUi.SURFACE : past ? PausaUi.GREEN : PausaUi.MUTED);
+            stepViews[i].setBackground(PausaUi.surface(this, on ? PausaUi.GREEN : past ? PausaUi.SAGE_SOFT : 0x80FFFCF6, 12));
+            stepViews[i].setSelected(on);
+        }
     }
 
     @SuppressLint("RequiresFeature")

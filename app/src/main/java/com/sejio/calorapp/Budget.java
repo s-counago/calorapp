@@ -109,6 +109,8 @@ final class Budget {
         final List<Rule> rules = new ArrayList<>();
         final Map<String, String> txn = new HashMap<>(), merchant = new HashMap<>(), alias = new HashMap<>();
         final Map<String, String> names = new HashMap<>(), notes = new HashMap<>();
+        /** Amount the owner expects for one fixed line in one cycle, keyed like {@link #skipKey}. */
+        final Map<String, Long> planned = new HashMap<>();
         final Set<String> skipped = new HashSet<>(), dismissed = new HashSet<>(), reviewed = new HashSet<>(), separate = new HashSet<>();
         /** Savings goal per cycle and the cushion for unexpected costs, set on a day. Cents; day -1 = not set. */
         long goal, cushion;
@@ -144,7 +146,7 @@ final class Budget {
             return new JSONObject().put("version", VERSION).put("rules", list).put("txn", new JSONObject(txn))
                     .put("merchant", new JSONObject(merchant)).put("alias", new JSONObject(alias)).put("names", new JSONObject(names))
                     .put("notes", new JSONObject(notes)).put("skipped", new JSONArray(skipped)).put("dismissed", new JSONArray(dismissed))
-                    .put("reviewed", new JSONArray(reviewed)).put("separate", new JSONArray(separate))
+                    .put("reviewed", new JSONArray(reviewed)).put("separate", new JSONArray(separate)).put("planned", new JSONObject(planned))
                     .put("goal", goal).put("cushion", cushion).put("cushionDay", cushionDay);
         }
 
@@ -161,6 +163,9 @@ final class Budget {
             copy(json.optJSONArray("dismissed"), settings.dismissed);
             copy(json.optJSONArray("reviewed"), settings.reviewed);
             copy(json.optJSONArray("separate"), settings.separate);
+            JSONObject planned = json.optJSONObject("planned");
+            if (planned != null && planned.names() != null)
+                for (int i = 0; i < planned.names().length(); i++) settings.planned.put(planned.names().getString(i), planned.getLong(planned.names().getString(i)));
             settings.goal = json.optLong("goal"); settings.cushion = json.optLong("cushion");
             settings.cushionDay = json.optInt("cushionDay", -1);
             if (json.optInt("version", 1) < 2) settings.upgradeToTwo();
@@ -337,6 +342,8 @@ final class Budget {
         final List<Entry> entries = new ArrayList<>();
         long paid, expected;
         int status, due, paidDay = -1, lastPaidDay = -1;
+        /** expected was set by the owner for this cycle rather than learned. */
+        boolean planned;
         /** Paid amount in earlier full cycles, oldest first. */
         long[] history = new long[0];
 
@@ -475,10 +482,14 @@ final class Budget {
                 if (entry.txn.cents < 0 && (line.paidDay < 0 || entry.txn.day < line.paidDay)) line.paidDay = entry.txn.day;
             }
             learn(snapshot, index, line);
+            Long plan = settings.planned.get(skipKey(rule, period));
+            if (plan != null) { line.expected = plan; line.planned = true; }
             boolean skipped = settings.skipped.contains(skipKey(rule, period));
             // A quarterly or yearly charge is only expected in the cycle its next date falls in; elsewhere it is being set aside.
             boolean dueHere = rule.frequency == 1 || (line.lastPaidDay >= 0 && line.due < period.end);
-            if (line.paid > 0) line.status = rule.invest && cycle.current && line.paid * 100 < line.expected * 85 ? PARTIAL : PAID;
+            // Short of a planned amount, an open cycle keeps the rest reserved: "Llevas 500 de 550".
+            boolean shortOfPlan = line.planned && line.paid * 100 < line.expected * 98;
+            if (line.paid > 0) line.status = cycle.current && (shortOfPlan || rule.invest && line.paid * 100 < line.expected * 85) ? PARTIAL : PAID;
             else if (skipped) line.status = SKIPPED;
             else if (!dueHere) line.status = RESERVED;
             else if (!cycle.current) line.status = period.end <= snapshot.today ? MISSED : UPCOMING;
@@ -613,6 +624,14 @@ final class Budget {
             if (c[2] == Math.min(dayOfMonth, Ledger.monthLength(c[0], c[1]))) return day;
         }
         return period.start;
+    }
+
+    /** Distinct amounts paid for a line in earlier cycles, most recent first: quick choices when planning. */
+    static List<Long> usualAmounts(Line line) {
+        List<Long> result = new ArrayList<>();
+        for (int i = line.history.length - 1; i >= 0 && result.size() < 4; i--)
+            if (line.history[i] > 0 && !result.contains(line.history[i])) result.add(line.history[i]);
+        return result;
     }
 
     static String skipKey(Rule rule, Period period) { return rule.id + "@" + Ledger.iso(period.start); }

@@ -66,6 +66,11 @@ public class MainActivity extends Activity implements TodayView.Host {
         state.putInt("section", currentSection); super.onSaveInstanceState(state);
     }
 
+    @Override protected void onPause() {
+        if (budgetView != null) budgetView.pause();
+        super.onPause();
+    }
+
     @Override protected void onResume() {
         super.onResume(); TaskResetScheduler.scheduleNext(this); syncNotificationState();
         if (counterView != null) counterView.refresh();
@@ -200,6 +205,7 @@ public class MainActivity extends Activity implements TodayView.Host {
             ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(focus.getWindowToken(), 0);
             focus.clearFocus();
         }
+        if (old == 7) budgetView.pause();
         for (View page : sections) {
             page.animate().cancel(); page.setTranslationX(0); page.setTranslationY(0); page.setAlpha(1);
             page.setVisibility(View.GONE);

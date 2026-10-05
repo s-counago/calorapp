@@ -311,6 +311,64 @@ final class MoneyMeters {
         }
     }
 
+    /**
+     * A capsule of light that drifts while a bank is being read. With a known total it fills instead;
+     * without system motion it stays still at a third.
+     */
+    static final class Working extends View {
+        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), glow = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private float phase, fraction = -1, shown;
+        private ValueAnimator drift;
+
+        Working(Context c, int trackColor, int color) {
+            super(c);
+            track.setColor(trackColor); glow.setColor(color);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        /** -1 for an unknown duration, otherwise 0..1. */
+        void set(float value) {
+            float next = value < 0 ? -1 : Math.max(0, Math.min(1, value));
+            if (next >= 0 && fraction >= 0 && PausaUi.motion(getContext())) {
+                ValueAnimator a = ValueAnimator.ofFloat(shown, next);
+                a.setDuration(500); a.setInterpolator(PausaUi.EASE);
+                a.addUpdateListener(v -> { shown = (Float) v.getAnimatedValue(); invalidate(); });
+                a.start();
+            } else shown = Math.max(0, next);
+            fraction = next;
+            invalidate();
+        }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            if (!PausaUi.motion(getContext())) return;
+            drift = ValueAnimator.ofFloat(0, 1);
+            drift.setDuration(1400); drift.setRepeatCount(ValueAnimator.INFINITE); drift.setInterpolator(PausaUi.EASE);
+            drift.addUpdateListener(a -> { phase = (Float) a.getAnimatedValue(); if (fraction < 0) invalidate(); });
+            drift.start();
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            if (drift != null) drift.cancel();
+            super.onDetachedFromWindow();
+        }
+
+        @Override protected void onMeasure(int w, int h) {
+            setMeasuredDimension(MeasureSpec.getSize(w), PausaUi.dp(getContext(), 6));
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float r = getHeight() / 2f, width = getWidth();
+            rect.set(0, 0, width, getHeight());
+            canvas.drawRoundRect(rect, r, r, track);
+            if (fraction >= 0) { rect.set(0, 0, Math.max(getHeight(), width * shown), getHeight()); canvas.drawRoundRect(rect, r, r, glow); return; }
+            float size = width * .34f, start = drift == null ? width * .33f : -size + (width + size) * phase;
+            rect.set(Math.max(0, start), 0, Math.min(width, start + size), getHeight());
+            if (rect.width() > 0) canvas.drawRoundRect(rect, r, r, glow);
+        }
+    }
+
     /** Thin share bar used by the category list. */
     static final class Share extends View {
         private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG);

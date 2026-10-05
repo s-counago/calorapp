@@ -33,18 +33,19 @@ import java.util.concurrent.Executors;
 /**
  * Dinero: the payroll-to-payroll budget built from the banks already saved on the phone.
  * Mes shows what is fixed, what is free and how the days are going; Movimientos lets the owner
- * teach the app; Bancos keeps the existing connections. Reading never contacts a bank.
+ * teach the app; Bancos shows how fresh each bank is and updates it on request. Reading never contacts a bank.
  */
 final class BudgetView extends LinearLayout {
     interface Source {
         JSONArray movements(Context context) throws Exception;
-        long lastSync(Context context);
+        /** When the bank ("abanca", "trade_republic") was last read completely; 0 if never. */
+        long lastSync(Context context, String bank);
     }
 
     /** Replaced by instrumentation tests with a fixture; production reads the encrypted ledger. */
     static Source source = new Source() {
         @Override public JSONArray movements(Context context) throws Exception { return BankingDatabase.get(context).movements(); }
-        @Override public long lastSync(Context context) { return BankingDatabase.get(context).lastSync(); }
+        @Override public long lastSync(Context context, String bank) { return BankingDatabase.get(context).lastSync(bank); }
     };
     static int todayOverride = Integer.MIN_VALUE;
 
@@ -53,11 +54,13 @@ final class BudgetView extends LinearLayout {
     private final PausaUi.Segmented tabs;
     private final View[] pages;
     private final LinearLayout month, moves;
-    private final BankingView banking;
+    private final BankSyncView banking;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private List<Ledger.Txn> txns;
     private Budget.Snapshot snapshot;
-    private long lastSync, generation;
+    private long tradeSync, abancaSync, generation;
+    /** Movements known before the last load, to announce what a sync brought. -1 until the first load. */
+    private int known = -1;
     private int page = -1, index = -1, filter;
     private boolean failed, animateNext = true;
     private long shownAvailable = Long.MIN_VALUE;
@@ -80,7 +83,7 @@ final class BudgetView extends LinearLayout {
         moves = column();
         moves.setPadding(dp(20), dp(6), dp(20), 0);
         movesScroll.addView(moves, new FrameLayout.LayoutParams(-1, -2));
-        banking = new BankingView(context);
+        banking = new BankSyncView(context, this::load);
         pages = new View[]{monthScroll, movesScroll, banking};
         for (View view : pages) { view.setVisibility(GONE); frame.addView(view, new FrameLayout.LayoutParams(-1, -1)); }
         show(0);
@@ -93,13 +96,16 @@ final class BudgetView extends LinearLayout {
         load();
     }
 
+    /** Leaving Dinero stops watching the Trade Republic client. */
+    void pause() { banking.stop(); }
+
     private void show(int next) {
         if (next == page) return;
         int previous = page;
         page = next;
         tabs.select(next, previous >= 0);
         for (int i = 0; i < pages.length; i++) pages[i].setVisibility(i == next ? VISIBLE : GONE);
-        if (next == 2) banking.refresh();
+        if (next == 2) banking.refresh(); else banking.stop();
         if (previous >= 0 && PausaUi.motion(getContext())) {
             View incoming = pages[next];
             incoming.setTranslationX(dp(next > previous ? 28 : -28)); incoming.setAlpha(0);
@@ -113,19 +119,26 @@ final class BudgetView extends LinearLayout {
         if (txns == null) loading();
         worker.execute(() -> {
             List<Ledger.Txn> loaded = null;
-            long synced = 0;
+            long trade = 0, abanca = 0;
             try {
                 loaded = Ledger.fromDatabase(source.movements(app), TimeZone.getDefault());
-                synced = source.lastSync(app);
+                trade = source.lastSync(app, "trade_republic");
+                abanca = source.lastSync(app, "abanca");
             } catch (Exception error) {
                 // Shown below; nothing is replaced or deleted.
             }
             final List<Ledger.Txn> result = loaded;
-            final long sync = synced;
+            final long t = trade, a = abanca;
             post(() -> {
                 if (version != generation) return;
                 failed = result == null;
-                if (result != null) { txns = result; lastSync = sync; }
+                if (result != null) {
+                    int fresh = result.size() - known;
+                    if (known >= 0 && fresh > 0 && isShown())
+                        PausaUi.snack(getContext(), fresh == 1 ? "1 movimiento nuevo" : fresh + " movimientos nuevos", null, null);
+                    known = result.size();
+                    txns = result; tradeSync = t; abancaSync = a;
+                }
                 recompute(true);
             });
         });
@@ -177,6 +190,8 @@ final class BudgetView extends LinearLayout {
         month.addView(PausaUi.text(c, subtitle, 13, PausaUi.MUTED, false), spaced(0, 18));
 
         if (cycle.current) {
+            View stale = staleNotice();
+            if (stale != null) month.addView(stale, spaced(0, 10));
             List<Budget.Review> pending = Budget.review(snapshot);
             if (!pending.isEmpty()) month.addView(reviewPill(pending.size()), spaced(0, 12));
         }
@@ -347,6 +362,28 @@ final class BudgetView extends LinearLayout {
         text.setLineSpacing(0, 1.15f);
         text.setPadding(dp(4), dp(4), dp(4), dp(4));
         return text;
+    }
+
+    /** A quiet line when a bank's data is old enough that the month may be missing things. */
+    private View staleNotice() {
+        long now = System.currentTimeMillis();
+        String behind = null;
+        long when = 0;
+        if (abancaSync > 0 && now - abancaSync >= BankSyncView.FRESH) { behind = "ABANCA"; when = abancaSync; }
+        if (tradeSync > 0 && now - tradeSync >= BankSyncView.FRESH && (behind == null || tradeSync < when)) { behind = "Trade Republic"; when = tradeSync; }
+        if (behind == null) return null;
+        Context c = getContext();
+        boolean old = now - when >= BankSyncView.STALE;
+        TextView row = PausaUi.text(c, behind + ": datos de " + ago(now - when) + " · Actualizar", 13, old ? PausaUi.TERRACOTTA : PausaUi.MUTED, true);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinHeight(dp(44));
+        row.setPadding(dp(14), 0, dp(14), 0);
+        row.setBackground(PausaUi.ripple(c, old ? PausaUi.PEACH_SOFT : PausaUi.CREAM_DEEP, 16));
+        row.setCompoundDrawables(new PausaUi.Symbol(c, "reset", old ? PausaUi.TERRACOTTA : PausaUi.MUTED, 16), null, null, null);
+        row.setCompoundDrawablePadding(dp(10));
+        row.setOnClickListener(v -> show(2));
+        row.setContentDescription("Los datos de " + behind + " son de " + ago(now - when) + ". Ir a actualizar");
+        return row;
     }
 
     // ------------------------------------------------------------ review inbox
@@ -839,7 +876,7 @@ final class BudgetView extends LinearLayout {
             case Budget.LATE: return "Se esperaba el " + Budget.date(line.due);
             case Budget.SKIPPED: return "Este ciclo no toca";
             case Budget.MISSED: return "No se pagó este ciclo";
-            default: return "Hacia el " + Budget.date(line.due);
+            default: return "Hacia el " + Budget.date(line.due) + (line.planned ? " · ajustado" : "");
         }
     }
 
@@ -890,6 +927,12 @@ final class BudgetView extends LinearLayout {
         bars.set(values, labels, line.status == Budget.LATE ? PausaUi.TERRACOTTA : PausaUi.SAGE);
         bars.setContentDescription("Importe pagado en los últimos ciclos");
         sheet.add(bars, 12);
+        if (cycle.current && line.status != Budget.SKIPPED) {
+            String how = line.planned ? "fijado para este ciclo" : line.rule.learn ? "según lo que sueles pagar" : "importe fijo";
+            View amount = settingRow("Este ciclo", Budget.money(line.expected) + " · " + how, () -> { sheet.dismiss(); amountSheet(cycle, line); });
+            amount.setContentDescription("Cambiar el importe de " + line.rule.name + " este ciclo: " + Budget.money(line.expected));
+            sheet.add(amount, 12);
+        }
         if (line.entries.isEmpty()) sheet.add(note(cycle.current ? "Aún no ha pasado por tus cuentas en este ciclo." : "No hubo cargos en este ciclo."), 8);
         else for (Budget.Entry entry : line.entries) sheet.add(entryRow(entry, () -> { sheet.dismiss(); classify(entry); }), 2);
         String key = Budget.skipKey(line.rule, cycle.period);
@@ -903,6 +946,87 @@ final class BudgetView extends LinearLayout {
         if (line.paid > 0 || !cycle.current) skip = null;
         sheet.footer(skip, PausaUi.action(c, "Editar", true, () -> { sheet.dismiss(); ruleEditor(line.rule, null); }));
         sheet.show();
+    }
+
+    /** How much a fixed line is this cycle, or from now on. Quick choices come from what was actually paid. */
+    private void amountSheet(Budget.Cycle cycle, Budget.Line line) {
+        Context c = getContext();
+        PausaUi.Sheet sheet = new PausaUi.Sheet(c, line.rule.name);
+        sheet.subtitle("¿Cuánto toca este ciclo? Lo que aún no haya salido de tus cuentas queda reservado hasta que salga.");
+        EditText input = new EditText(c);
+        PausaUi.input(input);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setTextSize(28);
+        input.setTypeface(Typeface.create("serif", Typeface.NORMAL));
+        input.setSingleLine(true);
+        input.setText(euros(line.expected));
+        input.setContentDescription("Importe en euros");
+        input.selectAll();
+        sheet.add(input, 10);
+        List<Long> usual = Budget.usualAmounts(line);
+        if (!usual.contains(line.expected)) usual.add(0, line.expected);
+        if (usual.size() > 1) {
+            Flow quick = new Flow(c);
+            for (long cents : usual) {
+                TextView chip = PausaUi.amountChip(c, Budget.money(cents), PausaUi.GREEN, PausaUi.SAGE_SOFT, "Usar " + Budget.money(cents), () -> {
+                    input.setText(euros(cents)); input.setSelection(input.getText().length());
+                });
+                chip.setPadding(dp(14), dp(8), dp(14), dp(8));
+                quick.addView(chip);
+            }
+            sheet.add(PausaUi.text(c, "Lo que has pagado otras veces", 12, PausaUi.MUTED, true), 6);
+            sheet.add(quick, 14);
+        }
+        final int[] scope = {0};
+        PausaUi.Segmented when = new PausaUi.Segmented(c, new String[]{"Solo este ciclo", "Desde ahora"}, i -> {
+            scope[0] = i;
+        });
+        sheet.add(when, 6);
+        when.post(() -> when.select(0, false));
+        TextView explain = note("«Desde ahora» fija el importe y deja de ajustarlo a lo que se cobre.");
+        sheet.add(explain, 4);
+        String key = Budget.skipKey(line.rule, cycle.period);
+        Button clear = line.planned ? PausaUi.quiet(c, "Quitar el ajuste", PausaUi.TERRACOTTA, () -> {
+            sheet.dismiss();
+            change(line.rule.name + ": vuelve a lo habitual", s -> s.planned.remove(key));
+        }) : null;
+        sheet.footer(clear, PausaUi.action(c, "Guardar", true, () -> {
+            long cents;
+            try {
+                cents = Ledger.cents(input.getText().toString().trim().replace(".", "").replace(",", "."));
+                if (cents <= 0) throw new NumberFormatException();
+            } catch (Exception error) { input.setError("Introduce un importe, por ejemplo 550"); return; }
+            sheet.dismiss();
+            boolean always = scope[0] == 1;
+            change(line.rule.name + ": " + Budget.money(cents) + (always ? " desde ahora" : " este ciclo"), s -> {
+                Budget.Rule rule = s.rule(line.rule.id);
+                if (always && rule != null) { rule.expected = cents; rule.learn = false; s.planned.remove(key); }
+                else s.planned.put(key, cents);
+            });
+        }));
+        TaskSheets.showWithKeyboard(sheet);
+        input.requestFocus();
+    }
+
+    private View settingRow(String label, String value, Runnable action) {
+        Context c = getContext();
+        LinearLayout row = new LinearLayout(c);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(56));
+        row.setPadding(dp(16), 0, dp(12), 0);
+        row.setBackground(PausaUi.ripple(c, PausaUi.CREAM, 18));
+        row.addView(PausaUi.text(c, label, 15, PausaUi.INK, false), new LayoutParams(0, -2, 1));
+        TextView amount = PausaUi.text(c, value, 14, PausaUi.MUTED, true);
+        amount.setCompoundDrawables(null, null, new PausaUi.Symbol(c, "chevron", PausaUi.MUTED, 18), null);
+        amount.setCompoundDrawablePadding(dp(6));
+        row.addView(amount, new LayoutParams(-2, -2));
+        row.setOnClickListener(v -> action.run());
+        return row;
+    }
+
+    /** Editable euros: "550" or "14,99". */
+    private static String euros(long cents) {
+        return cents % 100 == 0 ? Long.toString(cents / 100) : (cents / 100) + "," + (cents % 100 < 10 ? "0" : "") + cents % 100;
     }
 
     // ------------------------------------------------------------ everyday
@@ -1021,6 +1145,7 @@ final class BudgetView extends LinearLayout {
 
     private void footer() {
         Context c = getContext();
+        long lastSync = Math.max(tradeSync, abancaSync);
         String when = lastSync <= 0 ? "Sin sincronizaciones completas todavía" : "Actualizado " + ago(System.currentTimeMillis() - lastSync);
         TextView text = PausaUi.text(c, "ABANCA y Trade Republic, leídos desde tu teléfono.\n" + when + (failed ? " · no se pudo leer la base de datos" : ""), 12, PausaUi.MUTED, false);
         text.setGravity(Gravity.CENTER);
@@ -1326,6 +1451,17 @@ final class BudgetView extends LinearLayout {
         sheet.add(every, 12);
         final PausaUi.Segmented frequency = every;
         frequency.post(() -> frequency.select(months[0] >= 12 ? 2 : months[0] >= 3 ? 1 : 0, false));
+        PausaUi.Check learn = new PausaUi.Check(c, PausaUi.SAGE);
+        learn.setChecked(existing == null || existing.learn);
+        learn.setContentDescription("Ajustar el importe a lo que se cobra");
+        LinearLayout learnRow = new LinearLayout(c);
+        learnRow.setGravity(Gravity.CENTER_VERTICAL);
+        learnRow.setBackground(PausaUi.ripple(c, PausaUi.CREAM, 18));
+        learnRow.setPadding(dp(4), 0, dp(14), 0);
+        learnRow.addView(learn, new LayoutParams(dp(48), dp(48)));
+        learnRow.addView(PausaUi.text(c, "Ajustar el importe a lo que se cobra", 14, PausaUi.INK, false), new LayoutParams(0, -2, 1));
+        learnRow.setOnClickListener(v -> learn.performClick());
+        sheet.add(learnRow, 12);
         final String[] symbol = {existing != null ? existing.symbol : from != null ? Ledger.category(from.category).symbol : "spark"};
         Flow icons = new Flow(c);
         List<TextView> iconViews = new ArrayList<>();
@@ -1371,9 +1507,8 @@ final class BudgetView extends LinearLayout {
                     rule = new Budget.Rule("user-" + System.currentTimeMillis(), title, symbol[0], cents, dayOfMonth);
                     s.rules.add(rule);
                 }
-                boolean amountChanged = rule.expected != cents;
                 rule.name = title; rule.symbol = symbol[0]; rule.expected = cents; rule.day = dayOfMonth; rule.frequency = months[0];
-                if (amountChanged && existing != null) rule.learn = false;
+                rule.learn = learn.isChecked();
                 if (!rule.invest) { rule.keywords.clear(); rule.keywords.addAll(keys); }
                 if (from != null) s.txn.put(from.txn.id, "rule:" + rule.id);
             });

@@ -33,10 +33,13 @@ public final class BudgetUiSmokeTest extends Instrumentation {
     private int checks;
     private Activity activity;
     private String today = "2026-10-05";
+    /** Only with the emulator offline: opens the ABANCA shell without reaching the bank. */
+    private boolean offlineBrowser;
 
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         if (arguments != null && arguments.getString("today") != null) today = arguments.getString("today");
+        offlineBrowser = arguments != null && "true".equals(arguments.getString("offlineBrowser"));
         start();
     }
 
@@ -48,7 +51,9 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             JSONArray rows = fixture.exists() ? new JSONArray(new String(Files.readAllBytes(fixture.toPath()), StandardCharsets.UTF_8)) : synthetic();
             BudgetView.source = new BudgetView.Source() {
                 @Override public JSONArray movements(Context c) { return rows; }
-                @Override public long lastSync(Context c) { return System.currentTimeMillis() - 2 * 3_600_000L; }
+                @Override public long lastSync(Context c, String bank) {
+                    return System.currentTimeMillis() - (bank.equals("abanca") ? 50 : 2) * 3_600_000L;
+                }
             };
             BudgetView.todayOverride = Ledger.parseIso(today);
             BudgetStore.reset(context);
@@ -83,6 +88,23 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             capture("budget-05-fijo-detalle.png");
             pressBack();
 
+            AccessibilityNodeInfo couple = findContains("Cuenta de pareja,");
+            check(couple != null, "couple account tile present");
+            tapNode(couple);
+            AccessibilityNodeInfo amountRow = findContains("Cambiar el importe de Cuenta de pareja");
+            check(amountRow != null, "fixed line offers this cycle's amount");
+            tapNode(amountRow);
+            AccessibilityNodeInfo amount = find("Importe en euros", true);
+            Bundle text = new Bundle();
+            text.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "550");
+            amount.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, text);
+            settle();
+            capture("budget-13-importe.png");
+            tap("Guardar", false);
+            SystemClock.sleep(600);
+            check(BudgetStore.load(context).planned.containsValue(55_000L), "this cycle's amount is saved");
+            unsecure();
+
             tap("Movimientos", false);
             SystemClock.sleep(600);
             unsecure();
@@ -109,6 +131,20 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             pressBack();
             unsecure();
 
+            tap("Bancos", false);
+            SystemClock.sleep(900);
+            unsecure();
+            check(findContains("Trade Republic") != null && findContains("ABANCA") != null, "bank hub lists both banks");
+            capture("budget-14-bancos.png");
+            AccessibilityNodeInfo connectTrade = find("Conectar", false);
+            if (connectTrade == null) connectTrade = find("Volver a conectar", false);
+            if (connectTrade != null) {
+                tapNode(connectTrade);
+                capture("budget-15-conectar-tr.png");
+                tap("Cancelar", false); // Nothing is submitted to the bank in this test.
+                unsecure();
+            }
+
             tap("Mes", false);
             SystemClock.sleep(500);
             tap("Ciclo anterior", true);
@@ -117,6 +153,14 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             check(findContains("Te pasaste") != null || findContains("Te sobró") != null, "previous cycle shows its result");
             capture("budget-08-ciclo-anterior.png");
             BudgetStore.reset(context);
+            if (offlineBrowser) {
+                Activity web = startActivitySync(new Intent(context, BankBrowserActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        .putExtra(BankBrowserActivity.EXTRA_BANK, BankProvider.ABANCA.id).putExtra(BankBrowserActivity.EXTRA_SYNC, true));
+                SystemClock.sleep(2500);
+                runOnMainSync(() -> web.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE));
+                capture("budget-16-abanca.png");
+                runOnMainSync(web::finish);
+            }
             result.putString("stream", "PASS: " + checks + " budget UI checks. Screenshots in " + context.getExternalFilesDir(null) + "\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
