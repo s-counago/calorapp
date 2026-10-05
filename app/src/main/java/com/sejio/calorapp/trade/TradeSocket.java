@@ -45,10 +45,22 @@ final class TradeSocket extends WebSocketListener implements AutoCloseable {
         return readPayload(new JSONObject().put("type", "compactPortfolioByType").put("secAccNo", securitiesAccount));
     }
 
+    Object readInstrument(String id) throws Exception {
+        return readPayload(new JSONObject().put("type", "instrument").put("id", id), 10);
+    }
+
+    Object readTicker(String id, String exchange) throws Exception {
+        return readPayload(new JSONObject().put("type", "ticker").put("id", id + "." + exchange), 10);
+    }
+
     private Object readPayload(JSONObject payload) throws Exception {
+        return readPayload(payload, 25);
+    }
+
+    private Object readPayload(JSONObject payload, int seconds) throws Exception {
         int id = ++nextId;
         send("sub " + id + " " + payload);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(25);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
         try {
             while (true) {
                 String message = receive(deadline);
@@ -78,5 +90,8 @@ final class TradeSocket extends WebSocketListener implements AutoCloseable {
         throw new TradeException("SOCKET", "La conexión de datos se interrumpió o tardó demasiado. Puedes volver a sincronizar.");
     }
 
-    @Override public void close() { if (socket != null) { socket.close(1000, null); socket.cancel(); } }
+    @Override public void close() {
+        // Flush queued unsubscriptions before the normal close handshake. OkHttp bounds the close timeout.
+        if (socket != null && !socket.close(1000, null)) socket.cancel();
+    }
 }

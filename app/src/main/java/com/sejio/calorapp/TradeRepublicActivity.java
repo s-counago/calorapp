@@ -25,7 +25,7 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
     private LinearLayout loginPanel, pendingPanel, connectedPanel, history, portfolioHistory;
     private EditText phone, pin, code;
     private TextView status, pendingText;
-    private Button login, check, verify, sync, portfolioSync, cancel, forget;
+    private Button login, check, verify, sync, portfolioSync, valuationSync, cancel, forget;
     private boolean active;
     private long shownCapture = -1;
     private long shownPortfolio = -1;
@@ -70,7 +70,9 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
         sync = PausaUi.action(this, "Sincronizar saldo y movimientos", true, () -> repository.execute(c -> c.sync())); connectedPanel.addView(sync);
         portfolioSync = PausaUi.action(this, "Consultar posiciones de inversión", true, () -> repository.execute(c -> c.syncPortfolio()));
         connectedPanel.addView(portfolioSync);
-        connectedPanel.addView(label("Las posiciones se consultan por separado, solo al pulsar su botón. No se actualizan cotizaciones en directo.", false));
+        valuationSync = PausaUi.action(this, "Actualizar valoración", true, () -> repository.execute(c -> c.syncValuation()));
+        connectedPanel.addView(valuationSync);
+        connectedPanel.addView(label("La valoración consulta las posiciones y un último precio por instrumento, hasta 20. Solo al pulsar, sin cotizaciones continuas. Puedes repetir pasado un minuto.", false));
         connectedPanel.addView(label("Consulta al banco al pulsar Sincronizar. Los datos guardados se pueden leer sin conexión.", false));
         forget = PausaUi.quiet(this, "Olvidar conexión y datos locales", PausaUi.TERRACOTTA, () -> {
             new AlertDialog.Builder(this).setTitle("¿Olvidar Trade Republic en Pausa?")
@@ -98,10 +100,10 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
         connectedPanel.setVisibility(connected && !pending ? View.VISIBLE : View.GONE);
         code.setVisibility(authenticator ? View.VISIBLE : View.GONE); verify.setVisibility(authenticator ? View.VISIBLE : View.GONE);
         check.setVisibility(authenticator ? View.GONE : View.VISIBLE);
-        for (Button button : new Button[]{login, check, verify, sync, portfolioSync, cancel, forget}) button.setEnabled(!busy);
+        for (Button button : new Button[]{login, check, verify, sync, portfolioSync, valuationSync, cancel, forget}) button.setEnabled(!busy);
         phone.setEnabled(!busy); pin.setEnabled(!busy); code.setEnabled(!busy);
         if (!error.isEmpty()) status.setText(error);
-        else if (busy) status.setText("Consultando Trade Republic…");
+        else if (busy) status.setText(repository.progress());
         else if (connected) status.setText("Sesión guardada. Pulsa Sincronizar para consultar al banco.");
         else if (pending) status.setText("Acceso pendiente de tu confirmación.");
         else status.setText("Conecta tu cuenta para guardar una sesión en este teléfono.");
@@ -122,7 +124,18 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
         if (portfolio == null) return;
         portfolioHistory.addView(PausaUi.editorial(this, "Posiciones de inversión", 24));
         portfolioHistory.addView(label("Consulta: " + DateFormat.getDateTimeInstance().format(new Date(captured)), true));
-        portfolioHistory.addView(label("Identificadores y cantidades de la cuenta de valores. Esta lista no acredita cobertura de todos los productos; no incluye cotizaciones ni valoración actual.", false));
+        portfolioHistory.addView(label("Cuenta de valores · estimación al último precio recibido, no un precio garantizado de venta. Los datos pueden tener retraso o proceder de una sesión anterior del mercado.", false));
+        JSONObject totals = portfolio.optJSONObject("totals");
+        if (totals != null) {
+            portfolioHistory.addView(label("Valoración: " + totals.optInt("valued") + " de " + totals.optInt("positions")
+                    + " posiciones con precio y moneda confirmada.", true));
+            JSONObject currencies = totals.optJSONObject("byCurrency");
+            if (currencies != null) for (java.util.Iterator<String> it = currencies.keys(); it.hasNext();) {
+                String currency = it.next();
+                portfolioHistory.addView(label("Subtotal estimado " + currency + ": " + money(currencies.optString(currency)), true));
+            }
+            if (!totals.optBoolean("complete")) portfolioHistory.addView(label("Valoración parcial: hay posiciones sin valorar o sin moneda confirmada; no forman parte de los subtotales.", false));
+        } else portfolioHistory.addView(label("Pulsa Actualizar valoración para consultar precios.", false));
         JSONArray rows = portfolio.optJSONArray("positions");
         if (rows == null) return;
         if (rows.length() == 0) portfolioHistory.addView(label("El banco devolvió una lista de posiciones vacía para esta cuenta de valores.", false));
@@ -131,10 +144,32 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
             String currency = row.optString("currency");
             String cost = row.has("averageBuyIn") ? row.optString("averageBuyIn")
                     + (currency.isEmpty() ? " (moneda no indicada)" : " " + currency) : "No indicado";
-            portfolioHistory.addView(label(row.optString("instrumentId") + "\nCantidad: " + row.optString("quantity")
+            String name = row.optString("name", row.optString("instrumentId"));
+            portfolioHistory.addView(label(name + "\n" + row.optString("instrumentId") + "\nCantidad: " + row.optString("quantity")
                     + "\nPrecio medio de compra: " + cost, false));
+            JSONObject quote = row.optJSONObject("quote");
+            if (quote != null && quote.has("price")) {
+                String denomination = quote.optString("currency");
+                if (denomination.isEmpty()) denomination = "(moneda no enviada por TR)";
+                long quoted = quote.optLong("quotedAt");
+                String quoteDate = quoted > 0 ? DateFormat.getDateTimeInstance().format(new Date(quoted)) : "no indicada por TR";
+                portfolioHistory.addView(label("Último precio: " + quote.optString("price") + " " + denomination
+                        + "\nMercado: " + quote.optString("exchange") + " · fecha del precio: " + quoteDate
+                        + "\nRecibido: " + DateFormat.getDateTimeInstance().format(new Date(quote.optLong("receivedAt")))
+                        + (row.has("estimatedValue") ? "\nValor estimado: " + money(row.optString("estimatedValue")) + " " + denomination : ""), true));
+            } else if (totals != null) {
+                String reason = row.optString("valuationStatus");
+                portfolioHistory.addView(label(reason.equals("LIMIT") ? "Sin valorar: límite de esta consulta."
+                        : reason.equals("UNSUPPORTED_TYPE") ? "Sin valorar: tipo de instrumento o unidad no compatible."
+                        : reason.equals("NO_MARKET") ? "Sin valorar: mercado no disponible." : "Sin valorar: precio no disponible.", false));
+            }
         }
         if (rows.length() > 100) portfolioHistory.addView(label("Mostrando 100 de " + rows.length() + " posiciones guardadas.", false));
+    }
+
+    private String money(String value) {
+        try { return new java.math.BigDecimal(value).setScale(2, java.math.RoundingMode.HALF_UP).toPlainString(); }
+        catch (NumberFormatException error) { return "No disponible"; }
     }
 
     private void showHistory(JSONObject snapshot) {

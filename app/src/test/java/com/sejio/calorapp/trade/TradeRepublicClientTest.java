@@ -23,6 +23,10 @@ public class TradeRepublicClientTest {
     private static final String PHONE = "+34600000000";
     private static final String PIN = "1357";
 
+    private static class ClosingSocket extends WebSocketListener {
+        @Override public void onClosing(WebSocket ws, int code, String reason) { ws.close(code, null); }
+    }
+
     static final class Memory implements TradeRepublicClient.Store {
         JSONObject state;
         volatile boolean fail;
@@ -158,7 +162,7 @@ public class TradeRepublicClientTest {
 
     @Test public void websocketReadsCashAndBothTimelinesAndDeduplicatesPages() throws Exception {
         sessionResponses();
-        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new ClosingSocket() {
             @Override public void onMessage(WebSocket ws, String message) {
                 try {
                     if (message.startsWith("connect 31 ")) { ws.send("connected"); return; }
@@ -191,7 +195,7 @@ public class TradeRepublicClientTest {
         store.state = new JSONObject().put("schema", 1).put("deviceId", new String(new char[128]).replace('\0', 'a'))
                 .put("snapshot", new JSONObject().put("capturedAt", 123)); client = client();
         sessionResponses();
-        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new ClosingSocket() {
             @Override public void onMessage(WebSocket ws, String text) {
                 if (text.startsWith("connect")) ws.send("connected");
                 else if (text.startsWith("sub 1 ")) ws.send("1 A [{\"amount\":\"10.01\",\"currencyId\":\"EUR\"}]");
@@ -219,7 +223,7 @@ public class TradeRepublicClientTest {
         store.state = new JSONObject().put("schema", 1).put("deviceId", new String(new char[128]).replace('\0', 'a'))
                 .put("snapshot", new JSONObject().put("capturedAt", 123)); client = client();
         sessionResponses();
-        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new ClosingSocket() {
             @Override public void onMessage(WebSocket ws, String text) {
                 if (text.startsWith("connect")) ws.send("connected");
                 else if (text.startsWith("sub 1 ")) ws.send("1 A [{\"amount\":\"10.01\",\"currencyId\":\"EUR\"}]");
@@ -237,7 +241,7 @@ public class TradeRepublicClientTest {
 
     @Test public void paginationIsBoundedAndHistoryIsLabelledPartial() throws Exception {
         sessionResponses();
-        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new ClosingSocket() {
             private int pages;
             @Override public void onMessage(WebSocket ws, String text) {
                 try {
@@ -287,7 +291,7 @@ public class TradeRepublicClientTest {
                 .put("snapshot", new JSONObject().put("capturedAt", 123)); client = client();
         sessionResponses();
         java.util.List<String> commands = new java.util.concurrent.CopyOnWriteArrayList<>();
-        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new ClosingSocket() {
             @Override public void onMessage(WebSocket ws, String text) {
                 commands.add(text);
                 if (text.startsWith("connect")) ws.send("connected");
@@ -313,7 +317,7 @@ public class TradeRepublicClientTest {
         store.state = new JSONObject().put("schema", 1).put("deviceId", new String(new char[128]).replace('\0', 'a'))
                 .put("portfolio", new JSONObject().put("capturedAt", 456)); client = client();
         sessionResponses();
-        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new ClosingSocket() {
             @Override public void onMessage(WebSocket ws, String text) {
                 if (text.startsWith("connect")) ws.send("connected");
                 else if (text.startsWith("sub ")) ws.send("1 A {\"unknown\":[]}");
@@ -329,5 +333,61 @@ public class TradeRepublicClientTest {
         json("{\"someOtherAccountField\":true}");
         try { client.syncPortfolio(); fail(); } catch (TradeException e) { assertEquals("NO_SECURITIES_ACCOUNT", e.code); }
         assertEquals(2, server.getRequestCount());
+    }
+
+    @Test public void valuationReadsFreshPositionsAndUnsubscribesEachTopicWithoutExtraRequests() throws Exception {
+        sessionResponses();
+        java.util.List<String> commands = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.concurrent.CountDownLatch unsubscribed = new java.util.concurrent.CountDownLatch(3);
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new ClosingSocket() {
+            @Override public void onMessage(WebSocket ws, String text) {
+                commands.add(text);
+                if (text.startsWith("unsub ")) { unsubscribed.countDown(); return; }
+                if (text.startsWith("connect")) { ws.send("connected"); return; }
+                if (!text.startsWith("sub ")) return;
+                try {
+                    String[] parts = text.split(" ", 3); JSONObject payload = new JSONObject(parts[2]);
+                    String topic = payload.getString("type"), body;
+                    if (topic.equals("compactPortfolioByType")) body = "{\"categories\":[{\"positions\":[{\"isin\":\"TEST\",\"netSize\":\"2.5\"}]}]}";
+                    else if (topic.equals("instrument")) body = "{\"isin\":\"TEST\",\"typeId\":\"stock\",\"exchangeIds\":[\"LSX\"]}";
+                    else if (topic.equals("ticker") && payload.getString("id").equals("TEST.LSX")) body = "{\"isin\":\"TEST\",\"exchangeId\":\"LSX\",\"currencyId\":\"EUR\",\"last\":{\"price\":\"12.34\"}}";
+                    else { ws.close(1008, "unexpected"); return; }
+                    ws.send(parts[1] + " A " + body);
+                } catch (Exception e) { ws.close(1011, "fixture"); }
+            }
+        }));
+        client.syncValuation();
+        JSONObject portfolio = client.view().getJSONObject("portfolio");
+        assertEquals("30.850", portfolio.getJSONObject("totals").getJSONObject("byCurrency").getString("EUR"));
+        assertTrue(portfolio.getJSONObject("totals").getBoolean("complete"));
+        assertEquals(3, server.getRequestCount());
+        assertTrue("Every subscription must be closed", unsubscribed.await(2, TimeUnit.SECONDS));
+        int count = 0; for (String command : commands) if (command.startsWith("sub ")) count++;
+        assertEquals(3, count);
+        client = client();
+        try { client.syncValuation(); fail(); } catch (TradeException e) { assertEquals("QUOTE_COOLDOWN", e.code); }
+        assertEquals(3, server.getRequestCount());
+    }
+
+    @Test public void tickerRejectionStopsBatchAndKeepsPreviousValuation() throws Exception {
+        store.state = new JSONObject().put("schema", 1).put("deviceId", new String(new char[128]).replace('\0', 'a'))
+                .put("portfolio", new JSONObject().put("capturedAt", 123)); client = client();
+        sessionResponses();
+        java.util.List<String> queries = new java.util.concurrent.CopyOnWriteArrayList<>();
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new ClosingSocket() {
+            @Override public void onMessage(WebSocket ws, String text) {
+                if (text.startsWith("connect")) { ws.send("connected"); return; }
+                if (!text.startsWith("sub ")) return;
+                queries.add(text);
+                if (text.startsWith("sub 1 ")) ws.send("1 A {\"categories\":[{\"positions\":[{\"isin\":\"FIRST\",\"netSize\":\"1\"},{\"isin\":\"SECOND\",\"netSize\":\"1\"}]}]}");
+                else if (text.startsWith("sub 2 ")) ws.send("2 A {\"isin\":\"FIRST\",\"typeId\":\"stock\",\"exchangeIds\":[\"LSX\"]}");
+                else ws.send("3 E {\"error\":\"LIMIT\"}");
+            }
+        }));
+        try { client.syncValuation(); fail(); } catch (TradeException e) { assertEquals("DATA_REJECTED", e.code); }
+        assertEquals(3, queries.size());
+        assertEquals(123, client.view().getJSONObject("portfolio").getInt("capturedAt"));
+        assertEquals(123, store.state.getJSONObject("portfolio").getInt("capturedAt"));
+        assertFalse(store.state.has("instruments"));
     }
 }

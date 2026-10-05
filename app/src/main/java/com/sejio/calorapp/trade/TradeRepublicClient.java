@@ -23,6 +23,9 @@ import okio.ByteString;
 
 /** Native read client. Protocol reference: pytr e7f3ba3; no Python code is executed. */
 public final class TradeRepublicClient implements AutoCloseable {
+    public interface Progress { void changed(String message); }
+    private Progress progress = message -> {};
+    public synchronized void setProgress(Progress progress) { this.progress = progress; }
     public interface Store {
         JSONObject load() throws Exception;
         void save(JSONObject data) throws Exception;
@@ -67,6 +70,7 @@ public final class TradeRepublicClient implements AutoCloseable {
         cookies.restore(state.optJSONArray("cookies"));
         http = builder.cookieJar(cookies).followRedirects(false).followSslRedirects(false)
                 .retryOnConnectionFailure(false).connectTimeout(15, TimeUnit.SECONDS)
+                .webSocketCloseTimeout(2, TimeUnit.SECONDS)
                 .readTimeout(25, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS).build();
     }
 
@@ -85,7 +89,8 @@ public final class TradeRepublicClient implements AutoCloseable {
         if (state.has("processId") && state.optLong("expiresAt") > System.currentTimeMillis())
             throw new TradeException("PENDING", "Ya hay un acceso pendiente. Confírmalo o cancélalo antes de empezar otro.");
         // Explicit new connection; never mix snapshots or cookies from different accounts.
-        cookies.clear(); clearProcess(); state.remove("snapshot"); state.remove("portfolio"); securitiesAccount = "";
+        cookies.clear(); clearProcess(); state.remove("snapshot"); state.remove("portfolio"); state.remove("instruments");
+        state.remove("valuationAttempt"); securitiesAccount = "";
         state.put("connected", false); persist();
         String version = fetchAppVersion();
         state.put("appVersion", version); persist();
@@ -143,6 +148,7 @@ public final class TradeRepublicClient implements AutoCloseable {
 
     public synchronized void disconnect() throws Exception {
         clearProcess(); cookies.clear(); state.put("connected", false); state.remove("snapshot"); state.remove("portfolio");
+        state.remove("instruments"); state.remove("valuationAttempt");
         securitiesAccount = ""; persist();
     }
 
@@ -155,22 +161,58 @@ public final class TradeRepublicClient implements AutoCloseable {
     }
 
     public synchronized void syncPortfolio() throws Exception {
+        syncPortfolio(false);
+    }
+
+    public synchronized void syncValuation() throws Exception {
+        long now = System.currentTimeMillis();
+        if (state.optLong("valuationAttempt") > now - TimeUnit.MINUTES.toMillis(1))
+            throw new TradeException("QUOTE_COOLDOWN", "Ya se ha solicitado una valoración hace poco. Espera un minuto antes de repetir.");
         if (state.has("processId")) throw new TradeException("PENDING", "Completa primero la confirmación del acceso.");
+        state.put("valuationAttempt", now); persist();
+        syncPortfolio(true);
+    }
+
+    private void syncPortfolio(boolean valuePositions) throws Exception {
+        if (state.has("processId")) throw new TradeException("PENDING", "Completa primero la confirmación del acceso.");
+        progress.changed("Comprobando la sesión de Trade Republic…");
         verifySession();
         if (securitiesAccount.isEmpty() || securitiesAccount.equals("null") || securitiesAccount.length() > 100)
             throw new TradeException("NO_SECURITIES_ACCOUNT", "El banco no ha proporcionado una cuenta de valores. Se conserva la cartera anterior.");
         JSONObject portfolio;
+        JSONObject instrumentCache = state.optJSONObject("instruments");
         try (TradeSocket socket = new TradeSocket(http, new Request.Builder().url(api).header("User-Agent", userAgent).build())) {
             socket.connect();
+            progress.changed("Consultando las posiciones actuales…");
             JSONArray positions;
             try { positions = TradePortfolio.normalize(socket.readPortfolio(securitiesAccount)); }
             catch (org.json.JSONException error) { throw TradeException.protocol(); }
             portfolio = new JSONObject().put("capturedAt", System.currentTimeMillis()).put("positions", positions);
+            if (valuePositions) {
+                instrumentCache = TradeValuation.collect(positions, instrumentCache, new TradeValuation.Source() {
+                    int quotes;
+                    @Override public Object instrument(String id) throws Exception {
+                        progress.changed("Consultando los datos del instrumento…");
+                        return socket.readInstrument(id);
+                    }
+                    @Override public Object ticker(String id, String exchange) throws Exception {
+                        progress.changed("Consultando cotización " + (++quotes) + " (máximo 20)…");
+                        return socket.readTicker(id, exchange);
+                    }
+                }, System.currentTimeMillis());
+                portfolio.put("valuationAt", System.currentTimeMillis()).put("totals", TradeValuation.totals(positions));
+            }
         }
         JSONObject previous = state.optJSONObject("portfolio");
+        JSONObject previousCache = state.optJSONObject("instruments");
         state.put("portfolio", portfolio);
+        if (valuePositions) state.put("instruments", instrumentCache);
         try { persist(); }
-        catch (Exception error) { if (previous == null) state.remove("portfolio"); else state.put("portfolio", previous); throw error; }
+        catch (Exception error) {
+            if (previous == null) state.remove("portfolio"); else state.put("portfolio", previous);
+            if (previousCache == null) state.remove("instruments"); else state.put("instruments", previousCache);
+            throw error;
+        }
     }
 
     public synchronized void sync() throws Exception {

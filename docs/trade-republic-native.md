@@ -5,7 +5,7 @@ Se entra por **Banca → Trade Republic → Conectar y sincronizar**. Usa el pro
 de la web, sin WebView. La prueba anterior de navegador conserva sus propios perfiles;
 no comparte cookies ni datos con este cliente. ABANCA sigue con su implementación previa.
 
-La APK de prueba se llama **Pausa Banking · TR nativo**, versión 6.2-banking-tr (19),
+La APK de prueba se llama **Pausa Banking · TR nativo**, versión 6.3-banking-tr (20),
 con el mismo ID `com.sejio.calorapp.bankingua` y firma de la prueba anterior.
 
 ## Uso y alcance
@@ -45,9 +45,47 @@ posiciones y se muestran 100; un exceso se rechaza, sin sustituir la copia anter
 una truncada. Una lista vacía no se confunde con un esquema desconocido. La cobertura
 de todos los productos de inversión queda pendiente de contrastar con la cuenta real.
 
-No incluye cotizaciones/valoración actual, documentos, detalles completos de movimientos,
+El botón **Actualizar valoración** añade cotizaciones de TR al flujo de cartera,
+descrito abajo. No incluye documentos, detalles completos de movimientos,
 transferencias, operaciones de compra/venta ni sincronización periódica en segundo plano.
 No hay backend, Python, automatización de navegador ni puente JavaScript.
+
+### Valoración bajo demanda
+
+- Actualiza las cantidades de la cartera antes de calcular valores. Usa el mismo
+  WebSocket para `compactPortfolioByType`, `instrument` y `ticker`.
+- Consulta como máximo 20 instrumentos distintos por pulsación, secuencialmente y sin
+  suscripciones continuas. Los instrumentos repetidos comparten una cotización.
+  Hay un presupuesto de 60 segundos para empezar nuevas consultas de metadatos/precios;
+  cada una espera como máximo 10 segundos. El acceso y la cartera tienen sus propios
+  límites de espera. Los elementos omitidos quedan señalados, sin valor ficticio.
+- Nombre, mercado seleccionado y compatibilidad de unidad se guardan cifrados en caché
+  durante 24 horas. Se usa el primer `exchangeIds`, como pytr, sin probar otros mercados
+  ante errores. Se desuscribe tras cada respuesta y se cierra normalmente el socket.
+- Una pausa local persistente de un minuto entre intentos evita pulsaciones repetidas,
+  incluso si falló el intento anterior. No representa un límite autorizado por TR.
+- Solo se valoran tipos `stock` y `etf` identificados por los metadatos; un factor de
+  precio distinto de 1 se excluye. No se detectan bonos por su nombre ni se adivinan
+  unidades. Se utiliza `last.price`, sin sustituirlo por bid/ask ante ausencia.
+- `cantidad × precio` usa `BigDecimal`; se guarda sin redondear y se muestran dos
+  decimales para los valores. No se calcula ganancia ni se mezclan monedas.
+- La moneda procede exclusivamente de la cotización, si está informada. La moneda
+  del fondo, el efectivo o el precio medio no acreditan la moneda de negociación.
+  Si falta, se muestra el valor numérico con «moneda no enviada por TR» y se excluye
+  de los subtotales por moneda. Una cobertura incompleta se etiqueta como parcial.
+- Se distingue fecha del último precio (`last.time`) de fecha de recepción. Si falta
+  la fecha de precio, se indica; no se sustituye por la hora de descarga. Un precio de
+  ayer puede mostrarse como tal, sin prometer tiempo real ni precio ejecutable.
+- Rechazo del banco, corte o respuesta malformada detienen la tanda y conservan la
+  valoración anterior. Una respuesta válida sin último precio marca esa posición como
+  no disponible. No se reintenta automáticamente ni se consulta un proveedor alternativo.
+
+Referencia de precios:
+[pytr/tickers.py, misma revisión fijada](https://github.com/pytr-org/pytr/blob/e7f3ba37167bda15c0b5501f7ddab24c8d24d37e/pytr/tickers.py).
+Para los nombres `typeId`/`priceFactor` se ha contrastado también el esquema público de
+[instrumento del cliente Go, revisión b10c7ac563fa](https://github.com/dhojayev/traderepublic-portfolio-downloader/blob/b10c7ac563fa/v2/pkg/traderepublic/schemas/instrument.json).
+No se instala ni ejecuta ninguno de estos proyectos. El esquema de cotización sigue
+pendiente de validarse con la cuenta real; no se añade una dependencia de ejecución.
 
 ## Almacenamiento y red
 
@@ -93,6 +131,7 @@ y sus ejemplos públicos de eventos. Véase el aviso de licencia en
 | Sesión | `GET /api/v1/auth/web/session` y `GET /api/v2/auth/account` |
 | Datos | WebSocket al origen API, `connect 31`, suscripciones `cash`, `timelineTransactions`, `timelineActivityLog` |
 | Posiciones, consulta separada | `compactPortfolioByType` con `secAccNo`, una respuesta y desuscripción |
+| Valoración, botón independiente | `instrument` con ID; `ticker` con `ID.mercado`; una respuesta por consulta |
 
 Se envían las cabeceras de identificación del flujo web v2. Se lee `app-version` del
 HTML público al iniciar una conexión, con respaldo 2.2640.20 comprobado el 05/10/2026.
@@ -104,9 +143,9 @@ de intentos se detiene; no se intenta resolver ni eludir un desafío WAF.
 
 ## Validación
 
-Resultado del 05/10/2026: **25 pruebas JVM, 0 fallos**, incluidas ocho de cartera;
+Resultado del 05/10/2026: **36 pruebas JVM, 0 fallos**, incluidas once nuevas de valoración;
 compilación de `bankingUa`
-correcta; lint con **0 errores y 100 avisos** (incluidos textos sin recursos de
+correcta; lint con **0 errores y 99 avisos** (incluidos textos sin recursos de
 traducción). Las pruebas existentes de política de orígenes/perfiles y modos A/B/C
 también pasan. APK verificada con `apksigner`, mismo certificado que la prueba anterior,
 ID y versión comprobados y `debuggable=false`.
@@ -120,8 +159,9 @@ Cubren reanudación del proceso y de una aprobación, errores/caducidad/limitaci
 autenticador, redirecciones, persistencia, aislamiento de cookies, paginación,
 deduplicación, importes y conservación de la copia anterior ante respuestas inválidas.
 
-El usuario ha comunicado que el acceso y los saldos básicos funcionan en su teléfono.
-Esto no acredita movimientos, cartera, todos los productos ni estabilidad futura.
+El usuario ha comunicado que el acceso, los saldos básicos y las posiciones funcionan
+en su teléfono. Esto no acredita las cotizaciones/valoraciones nuevas, movimientos,
+todos los productos ni estabilidad futura.
 No se ha autenticado una cuenta bancaria real desde el entorno de desarrollo. Las pruebas JVM
 no ejecutan Android Keystore ni el ciclo de vida Android: quedan pendientes la prueba
 en teléfono, el cambio a la app bancaria y la comparación del saldo y movimientos con
@@ -135,6 +175,12 @@ Los casos de cartera usan respuestas sintéticas construidas según `api.py` y
 con una cuenta real. No se mandan credenciales ficticias a Trade Republic ni se ejecutan
 baterías de pruebas contra su API. La prueba real pendiente consiste en una consulta
 manual desde el teléfono y comparación de posiciones conocidas con la app oficial.
+
+Las pruebas de valoración comprueban fracciones, monedas desconocidas, subtotales por
+moneda, precios/fechas ausentes, límite de consultas, caché, reutilización entre posiciones,
+rechazo de instrumentos o mercados incorrectos, desuscripción, espera entre intentos
+y conservación de la copia previa ante rechazo del banco. Son fixtures sintéticas;
+no se han enviado peticiones autenticadas reales desde el entorno de desarrollo.
 
 Se conserva la identificación de compatibilidad web ya utilizada; no se afirma que
 Pausa se identifique como una integración oficial. Se reutiliza el dispositivo/sesión,

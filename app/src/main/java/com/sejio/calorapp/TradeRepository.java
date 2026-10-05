@@ -35,12 +35,14 @@ final class TradeRepository {
     private volatile Listener listener;
     private volatile JSONObject view;
     private volatile String error = "";
+    private volatile String progress = "";
 
     private TradeRepository(Context context) { this.context = context; }
     void observe(Listener listener) { this.listener = listener; notifyUi(); if (view == null) execute(c -> {}); }
     void detach(Listener old) { if (listener == old) listener = null; }
     JSONObject current() { return view; }
     String error() { return error; }
+    String progress() { return progress; }
     boolean busy() { return busy.get(); }
 
     void execute(Work work) {
@@ -62,7 +64,7 @@ final class TradeRepository {
 
     private void submit(Task task) {
         if (!busy.compareAndSet(false, true)) return;
-        error = ""; notifyUi();
+        error = ""; progress = "Preparando la consulta…"; notifyUi();
         worker.execute(() -> {
             try {
                 task.run();
@@ -87,7 +89,9 @@ final class TradeRepository {
                 .put("screen", metrics.widthPixels + "x" + metrics.heightPixels + "x24")
                 .put("preferredLanguages", new JSONArray().put(Locale.getDefault().toLanguageTag()))
                 .put("numberOfCores", Runtime.getRuntime().availableProcessors());
-        return new TradeRepublicClient(new TradeVault(context), agent, device);
+        TradeRepublicClient result = new TradeRepublicClient(new TradeVault(context), agent, device);
+        result.setProgress(message -> { progress = message; notifyUi(); });
+        return result;
     }
 
     private void notifyUi() {

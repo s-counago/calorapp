@@ -1,5 +1,10 @@
 # ABANCA: siguiente integración
 
+**Siguiente paso acordado:** inspeccionar puntualmente las consultas de red de la web
+autenticada para estudiar un cliente de sincronización. Ver
+[guía de muestra de red](abanca-network-sample.md). La captura DOM de abajo no sustituye
+ese análisis y Pausa no registra tráfico HTTP de ABANCA actualmente.
+
 El usuario confirma que su acceso web está desbloqueado. No se ha confirmado todavía
 en esta revisión el acceso desde WebView de Pausa ni el resultado del lector con su
 cuenta. No se han utilizado sus credenciales ni hecho pruebas de login desde cloud.
