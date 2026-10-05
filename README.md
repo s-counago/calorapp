@@ -3,6 +3,36 @@
 Aplicación Android personal con contadores diarios y formalización asistida de
 viajes de Renfe entre A Coruña y Santiago de Compostela.
 
+## Banking local: ABANCA y Trade Republic
+
+La pestaña `Banca` abre cada banco en un perfil WebView independiente y persistente
+en el teléfono. No necesita Sure, un backend ni configurar credenciales en archivos.
+Introduce tus credenciales y el segundo factor directamente en la web del banco.
+Pausa reutiliza el perfil mientras el banco acepte la sesión; no garantiza una
+duración ni realiza reintentos automáticos de acceso.
+
+1. Abre `Banca` y selecciona el banco. Se necesita un Android System WebView actualizado
+   con soporte de perfiles múltiples.
+2. Completa el acceso y abre el resumen, los movimientos o la cartera.
+3. Pulsa `Guardar datos de esta página`. El lector guarda texto financiero visible
+   en tablas, listas y resúmenes compatibles. No pulsa botones ni realiza operaciones.
+4. Vuelve a `Banca` para consultar la última captura y su fecha sin conectar al banco.
+   Cada captura sustituye la anterior de ese banco; no acumula un libro de movimientos.
+
+**Estado: base implementada, pendiente de validar el acceso con las cuentas reales.**
+Las capturas son parciales: no recorren páginas, no descargan extractos, no cubren
+todo el historial y no calculan un saldo consolidado. Si una página no se reconoce,
+se conserva la captura anterior. La web puede rechazar navegadores integrados;
+abrirla en Chrome no comparte su sesión con este módulo. Una sesión web bancaria
+tiene las capacidades normales de la cuenta, aunque nuestro lector solo consulte.
+
+Las capturas se cifran con Android Keystore. Las cookies permanecen en el perfil
+privado de WebView, separado de Renfe y del otro banco. `Olvidar sesión` borra ese
+perfil local; `Borrar captura` elimina los datos guardados. Para revocar una sesión
+en el servidor hay que usar las opciones del propio banco.
+
+Arquitectura, límites, fuentes y comprobaciones: [Banking local](docs/banking-local.md).
+
 ## Avisos de plazas Renfe
 
 El monitor de `tools/renfe-seat-monitor.js` consulta cada minuto la venta pública
@@ -203,4 +233,3 @@ When the app opens, allow notification permission so the sticky notification can
 La web de Renfe puede cambiar sin previo aviso. Cuando una pantalla no se
 reconozca, la aplicación se detiene y permite completar ese paso manualmente
 antes de continuar.
-

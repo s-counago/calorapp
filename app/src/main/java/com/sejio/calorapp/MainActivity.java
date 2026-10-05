@@ -16,7 +16,7 @@ import java.util.List;
 
 /**
  * App shell. Content scrolls beneath a floating navigation; a contextual action button sits beside it.
- * Sections: 0 Hoy, 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero).
+ * Sections: 0 Hoy, 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Banca.
  */
 public class MainActivity extends Activity implements TodayView.Host {
     private static final int REQUEST_NOTIFICATIONS = 42;
@@ -30,6 +30,7 @@ public class MainActivity extends Activity implements TodayView.Host {
     private PlannerView plannerView;
     private PlannerView todayPlannerView;
     private WeeklyPlannerView weeklyPlannerView;
+    private BankingView bankingView;
     private View[] sections;
     private PausaNavigation navigation;
     private PausaUi.Segmented taskTabs;
@@ -73,9 +74,12 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (plannerView != null) plannerView.refresh();
         if (todayPlannerView != null) todayPlannerView.refresh();
         if (weeklyPlannerView != null) weeklyPlannerView.refresh();
+        if (currentSection == 7 && bankingView != null) bankingView.refresh();
     }
 
     private View createAppView() {
+        final boolean compactNavigation = getResources().getConfiguration().screenWidthDp < 380;
+        final int navigationMargin = dp(compactNavigation ? 8 : 16);
         FrameLayout root = new FrameLayout(this);
         root.setBackground(PausaUi.atmosphere());
         // Floating elements cast soft shadows past their own bounds; never cut them into boxes.
@@ -101,7 +105,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         plannerView = new PlannerView(this);
         weeklyPlannerView = new WeeklyPlannerView(this);
         todayPlannerView = new PlannerView(this, 0);
-        sections = new View[]{counterView, ticketPlannerView, taskListView, habitListView, plannerView, weeklyPlannerView, todayPlannerView};
+        bankingView = new BankingView(this);
+        sections = new View[]{counterView, ticketPlannerView, taskListView, habitListView, plannerView, weeklyPlannerView, todayPlannerView, bankingView};
         for (View section : sections) {
             section.setVisibility(View.GONE);
             content.addView(section, new FrameLayout.LayoutParams(-1, -1));
@@ -124,11 +129,11 @@ public class MainActivity extends Activity implements TodayView.Host {
         fab.setScaleType(ImageView.ScaleType.CENTER);
         fab.setStateListAnimator(android.animation.AnimatorInflater.loadStateListAnimator(this, R.animator.button_press));
         fab.setOnClickListener(v -> { v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); primaryAction(); });
-        LinearLayout.LayoutParams fabParams = new LinearLayout.LayoutParams(dp(68), dp(68));
-        fabParams.leftMargin = dp(10);
+        LinearLayout.LayoutParams fabParams = new LinearLayout.LayoutParams(dp(compactNavigation ? 48 : 68), dp(compactNavigation ? 48 : 68));
+        fabParams.leftMargin = dp(compactNavigation ? 6 : 10);
         navRow.addView(fab, fabParams);
         FrameLayout.LayoutParams navParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
-        navParams.leftMargin = dp(16); navParams.rightMargin = dp(16);
+        navParams.leftMargin = navigationMargin; navParams.rightMargin = navigationMargin;
         root.addView(navRow, navParams);
 
         snackHost = new FrameLayout(this);
@@ -153,7 +158,7 @@ public class MainActivity extends Activity implements TodayView.Host {
             column.setPadding(left, top, right, keyboardVisible ? ime : 0);
             FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) navRow.getLayoutParams();
             np.bottomMargin = bottom + dp(12);
-            np.leftMargin = left + dp(16); np.rightMargin = right + dp(16);
+            np.leftMargin = left + navigationMargin; np.rightMargin = right + navigationMargin;
             navRow.setLayoutParams(np);
             navRow.setVisibility(keyboardVisible ? View.GONE : View.VISIBLE);
             scrim.setVisibility(keyboardVisible ? View.GONE : View.VISIBLE);
@@ -184,7 +189,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         }
     }
 
-    private static boolean isTaskSection(int section) { return section == 2 || section >= 4; }
+    private static boolean isTaskSection(int section) { return section == 2 || (section >= 4 && section <= 6); }
 
     private void showSection(int section) {
         section = Math.max(0, Math.min(sections.length - 1, section));
@@ -205,6 +210,12 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (section == 4) plannerView.refresh();
         if (section == 5) weeklyPlannerView.refresh();
         if (section == 6) todayPlannerView.refresh();
+        if (section == 7) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            bankingView.refresh();
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
         View incoming = sections[section];
         incoming.setVisibility(View.VISIBLE);
         navigation.select(section, old != -1);
@@ -239,6 +250,7 @@ public class MainActivity extends Activity implements TodayView.Host {
     }
 
     private void updateFab(int section, boolean animate) {
+        fab.setVisibility(section == 7 ? View.GONE : View.VISIBLE);
         String icon = section == 1 ? "ticket" : "plus";
         String label = section == 1 ? "Revisar y formalizar" : section == 3 ? "Nuevo hábito"
                 : section == 6 ? "Añadir al plan de hoy" : section == 4 ? "Añadir al plan de mañana" : "Nueva tarea";
@@ -262,6 +274,7 @@ public class MainActivity extends Activity implements TodayView.Host {
 
     private void primaryAction() {
         switch (currentSection) {
+            case 7: break; // Banking has explicit per-bank actions.
             case 1: ticketPlannerView.review(); break;
             case 2: taskListView.focusComposer(); break;
             case 3: habitListView.createHabit(); break;

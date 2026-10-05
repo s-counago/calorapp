@@ -14,7 +14,7 @@ import java.util.List;
 
 /** Run on a disposable emulator. Exercises the Amanecer shell with real touches and captures visual states. */
 public final class PausaUiSmokeTest extends Instrumentation {
-    private static final String[] LABELS = {"Diario", "Viajes", "Lista", "Hábitos", "Mañana", "Semana", "Plan de hoy"};
+    private static final String[] LABELS = {"Diario", "Viajes", "Lista", "Hábitos", "Mañana", "Semana", "Plan de hoy", "Banca"};
     private Activity activity;
     private int checks;
     private File output;
@@ -39,17 +39,22 @@ public final class PausaUiSmokeTest extends Instrumentation {
                 final int expected = i;
                 runOnMainSync(() -> {
                     check(((Integer) field(activity, "currentSection")) == expected, "touch navigates to " + LABELS[expected]);
-                    String parent = expected == 1 ? "Viajes" : expected == 3 ? "Hábitos" : expected == 0 ? "Hoy" : "Tareas";
+                    String parent = expected == 7 ? "Banca" : expected == 1 ? "Viajes" : expected == 3 ? "Hábitos" : expected == 0 ? "Hoy" : "Tareas";
                     check(findDescription(nav, parent).isSelected(), "selected tab " + parent);
                     View[] pages = (View[]) field(activity, "sections");
                     int visible = 0; for (View page : pages) if (page.getVisibility() == View.VISIBLE) visible++;
                     check(visible == 1, "exactly one page visible");
-                    boolean tasks = expected == 2 || expected >= 4;
+                    boolean tasks = expected == 2 || (expected >= 4 && expected <= 6);
                     check(((View) field(activity, "taskHeader")).getVisibility() == (tasks ? View.VISIBLE : View.GONE),
                             "task segments only inside Tareas");
+                    check(fab.getVisibility() == (expected == 7 ? View.GONE : View.VISIBLE), "Banking uses per-bank actions");
+                    boolean secure = (activity.getWindow().getAttributes().flags & android.view.WindowManager.LayoutParams.FLAG_SECURE) != 0;
+                    check(secure == (expected == 7), "Banking protects screen captures");
                 });
-                capture("tab-" + i);
+                if (i != 7) capture("tab-" + i); // Banking deliberately forbids screenshots.
             }
+            tap(findDescription(nav, "Tareas"));
+            check(((Integer) field(activity, "currentSection")) == 6, "Banking preserves the previous Tareas segment");
             // Quick counters with real touches, then restore fixture values.
             select("Diario");
             View counter = (View) field(activity, "counterView");

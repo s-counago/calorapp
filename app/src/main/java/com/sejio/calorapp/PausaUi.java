@@ -768,6 +768,10 @@ final class PausaUi {
         @Override public void draw(Canvas c) {
             c.save(); c.translate(getBounds().left, getBounds().top); c.scale(getBounds().width()/24f, getBounds().height()/24f);
             switch(name) {
+                case "bank":
+                    line(c, 3, 8, 12, 3, 21, 8, 3, 8);
+                    line(c, 5, 11, 5, 18); line(c, 12, 11, 12, 18); line(c, 19, 11, 19, 18);
+                    line(c, 3, 21, 21, 21); break;
                 case "sunrise":
                     p.setStyle(Paint.Style.FILL);
                     c.drawArc(3,10,21,28,180,180,true,p);

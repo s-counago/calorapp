@@ -20,6 +20,10 @@
         </activity>
 
         <activity
+            android:name=".BankBrowserActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".RenfeAutomationActivity"
             android:exported="false" />
 

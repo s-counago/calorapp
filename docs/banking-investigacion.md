@@ -1,5 +1,10 @@
 # Banking en Pausa: investigación y propuesta
 
+> Actualización 04/10/2026: la decisión actual del usuario es gestionar sesiones
+> propias de ABANCA y Trade Republic, sin Sure. La base Android y sus límites se
+> describen en [banking-local.md](banking-local.md). El resto de este documento
+> conserva la investigación histórica, no la recomendación vigente.
+
 Fecha de consulta inicial: 18 de septiembre de 2026. Revisión de alojamiento: 21 de septiembre de 2026.
 
 Objetivo: conectar ABANCA y Trade Republic en modo solo lectura para reducir el trabajo de registrar gastos y calcular un presupuesto que se adapte al gasto real sin consumir inadvertidamente los ahorros. El usuario confirma IBAN español en Trade Republic; medir la cartera sería deseable, pero opcional. Se toma como escenario inicial el uso personal descrito en el README; abrir el servicio a otras personas requeriría revisar las condiciones del proveedor.
