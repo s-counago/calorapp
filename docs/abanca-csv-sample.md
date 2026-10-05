@@ -33,12 +33,15 @@ El concepto ampliado debe tratarse como texto, no como fórmula ni instrucción.
 Aunque esta muestra no contiene campos entrecomillados, un lector CSV debe soportar
 comillas, separadores dentro de campos y saltos de línea correctamente.
 
-## Uso como referencia
+## Uso como referencia en 6.5
 
 El usuario aclara que este archivo es solo un ejemplo de datos. No se desarrolla
 un importador CSV: la extracción debe salir de la WebView y persistirse en SQLite.
 El archivo ayuda a distinguir fecha contable de fecha valor y la descripción breve
 de la ampliada. No se convierte en una fixture con datos personales ni se incorpora
 al repositorio.
+
+En 6.6 se añade una carga inicial a petición del usuario con nuevos archivos de
+histórico: [banking-initial-history.md](banking-initial-history.md).
 
 La integración actual se describe en [banking-database.md](banking-database.md).

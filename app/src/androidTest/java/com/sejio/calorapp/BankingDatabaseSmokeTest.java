@@ -36,6 +36,22 @@ public final class BankingDatabaseSmokeTest extends Instrumentation {
             db.close(); db = new BankingDatabase(getTargetContext(), file);
             check(db.runs("abanca", 0).getJSONObject(0).getString("status").equals("interrupted"));
             check(db.pages("test-run").getJSONObject(0).getJSONObject("normalized").getJSONArray("records").length() == 2);
+            String csv = "Fecha ctble;Fecha valor;Concepto;Importe;Moneda;Saldo;Moneda;Concepto ampliado\n"
+                    + "05-10-2026;06-10-2026;FictionalPrivatePurchase;-12,50;EUR;-12,50;EUR;Export detail\n";
+            BankingImport.Parsed seed = BankingImport.parse(csv.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            JSONObject target = db.importProducts("abanca", "account").getJSONObject(0);
+            check(db.importFile(seed, target, 3).getBoolean("saved"));
+            check(db.counts("abanca").getLong("movements") == 1);
+            check(!db.importFile(seed, target, 4).getBoolean("saved"));
+            try (Cursor c = db.getReadableDatabase().rawQuery("SELECT COUNT(*) FROM observations", null)) { c.moveToFirst(); check(c.getInt(0) == 3); }
+            try (Cursor c = db.getReadableDatabase().rawQuery("SELECT latest_capture FROM entities", null)) { c.moveToFirst(); check(c.getString(0).equals("test-capture")); }
+            long runsBefore = db.counts("abanca").getLong("sync_runs");
+            BankingImport.Parsed broken = BankingImport.parse((csv + "06-10-2026;06-10-2026;Another fictional purchase;-1,00;EUR;0,00;EUR;\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            broken.records.getJSONObject(1).remove("amount");
+            boolean rejected = false;
+            try { db.importFile(broken, target, 5); } catch (Exception expected) { rejected = true; }
+            check(rejected); check(db.counts("abanca").getLong("sync_runs") == runsBefore);
+            check(db.counts("abanca").getLong("movements") == 1);
             db.deleteBank("abanca"); check(db.counts("abanca").getLong("movements") == 0);
             result.putString("stream", "PASS: native SQLite/Keystore, duplicate observations, idempotent capture, encrypted payload, reopen and deletion\n");
             finish(Activity.RESULT_OK, result);

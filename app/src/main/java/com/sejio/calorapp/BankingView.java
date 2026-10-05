@@ -32,6 +32,8 @@ final class BankingView extends LinearLayout {
         content.addView(PausaUi.editorial(getContext(), "Banking", 30));
         paragraph(content, "Tus bancos, en tu teléfono. Consulta lo guardado sin volver a iniciar sesión.", false);
         for (BankProvider bank : BankProvider.values()) card(bank);
+        content.addView(PausaUi.action(getContext(), "Cargar histórico inicial", false, () -> getContext().startActivity(
+                new Intent(getContext(), BankingImportActivity.class))));
     }
 
     private void card(BankProvider bank) {

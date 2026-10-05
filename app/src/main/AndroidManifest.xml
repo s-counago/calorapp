@@ -28,6 +28,7 @@
             android:exported="false" />
 
         <activity android:name=".AbancaArchiveActivity" android:exported="false" />
+        <activity android:name=".BankingImportActivity" android:exported="false" />
 
         <activity
             android:name=".RenfeAutomationActivity"

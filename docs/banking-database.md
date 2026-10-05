@@ -1,8 +1,9 @@
 # Persistencia bancaria y sincronización desde WebView
 
-Versión 6.5-banking-tr (código 22). El objetivo de esta fase es extraer y guardar,
-con procedencia verificable. No se incorpora un importador CSV ni budgeting. El CSV
-aportado se utiliza únicamente como referencia del significado de los campos.
+Versión 6.6-banking-tr (código 23). El objetivo es extraer y guardar con procedencia
+verificable. La carga inicial de CSV/TXT solicitada posteriormente se documenta en
+[banking-initial-history.md](banking-initial-history.md); complementa la sincronización
+habitual. Budgeting sigue fuera de esta fase.
 
 ## Flujo ABANCA
 
