@@ -298,17 +298,27 @@ public final class BankBrowserActivity extends Activity {
                     status.setText("Completa el acceso o la verificación del banco y vuelve a guardar los datos.");
                     return;
                 }
+                if ("no_records".equals(data.optString("status"))) {
+                    status.setText("Página reconocida, pero sin registros que se puedan guardar. La captura anterior se conserva.");
+                    return;
+                }
                 if (!"captured".equals(data.optString("status"))) {
                     status.setText("No se encontraron datos legibles aquí. Abre el resumen o los movimientos. La captura anterior se conserva.");
                     return;
                 }
+                if (bank == BankProvider.ABANCA) data = AbancaSnapshot.prepare(data);
                 data.put("schema", 1);
                 data.put("bank", bank.id);
                 data.put("capturedAt", System.currentTimeMillis());
                 // Keep only the origin: never persist query parameters, fragments or path tokens.
                 data.put("url", "https://" + Uri.parse(url).getHost() + "/");
                 BankSnapshotStore.save(this, bank, data);
-                status.setText("Captura guardada para consultar sin conexión. Solo incluye datos cargados de esta página, no todo el historial.");
+                if (bank == BankProvider.ABANCA) {
+                    status.setText(AbancaSnapshot.title(data) + ": " + data.getJSONArray("rows").length()
+                            + " registros guardados. Esta página sustituye la captura anterior; no incluye todo el historial."
+                            + (data.optInt("omittedRows") > 0 ? " Algunas filas no se pudieron interpretar." : "")
+                            + (data.optBoolean("truncated") ? " Se alcanzó el límite de lectura o de texto." : ""));
+                } else status.setText("Captura guardada para consultar sin conexión. Solo incluye datos cargados de esta página, no todo el historial.");
             } catch (Exception error) {
                 status.setText("No se pudo guardar la captura. Tus datos anteriores se conservan; no se ha registrado información bancaria en los logs.");
             }
@@ -316,7 +326,8 @@ public final class BankBrowserActivity extends Activity {
     }
 
     private String readAsset() throws Exception {
-        try (InputStream input = getAssets().open("banking/read-visible.js");
+        try (InputStream input = getAssets().open(bank == BankProvider.ABANCA
+                ? "banking/read-abanca.js" : "banking/read-visible.js");
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[4096];
             int read;

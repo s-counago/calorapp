@@ -68,6 +68,11 @@ final class BankingView extends LinearLayout {
         else {
             String date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(new Date(snapshot.optLong("capturedAt")));
             paragraph(card, "Última captura: " + date, true);
+            if (AbancaSnapshot.READER.equals(snapshot.optString("reader"))) {
+                paragraph(card, AbancaSnapshot.title(snapshot), true);
+                if (snapshot.optInt("omittedRows") > 0) paragraph(card,
+                        snapshot.optInt("omittedRows") + " filas no se pudieron interpretar y se han omitido.", false);
+            }
             paragraph(card, "Captura parcial de una página; no es un saldo consolidado ni un historial completo. Una nueva captura sustituye esta copia.", false);
             if (snapshot.optBoolean("truncated")) paragraph(card, "Se alcanzó el límite de la captura: algunos datos se han recortado.", false);
             JSONArray rows = snapshot.optJSONArray("rows");
@@ -96,7 +101,8 @@ final class BankingView extends LinearLayout {
         if (values != null) for (int i = 0; i < values.length(); i++) paragraph(rows, values.optString(i), false);
         ScrollView scroll = new ScrollView(getContext());
         scroll.addView(rows);
-        AlertDialog dialog = new AlertDialog.Builder(getContext()).setTitle("Datos guardados · captura parcial")
+        AlertDialog dialog = new AlertDialog.Builder(getContext()).setTitle(
+                AbancaSnapshot.title(data) + " · captura parcial")
                 .setView(scroll).setPositiveButton("Cerrar", null).create();
         dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
         dialog.show();

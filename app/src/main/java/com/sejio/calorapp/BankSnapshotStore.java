@@ -43,6 +43,10 @@ final class BankSnapshotStore {
         if (data.getInt("schema") != 1 || !bank.id.equals(data.getString("bank"))
                 || !bank.allows(data.getString("url")) || !data.getBoolean("partial")
                 || data.getLong("capturedAt") <= 0) throw new IllegalArgumentException("Captura no válida");
+        if (data.has("reader")) {
+            if (bank != BankProvider.ABANCA) throw new IllegalArgumentException("Lector no válido");
+            AbancaSnapshot.validate(data);
+        }
         JSONArray rows = data.getJSONArray("rows");
         if (rows.length() == 0 || rows.length() > 200) throw new IllegalArgumentException("Sin datos legibles");
         for (int i = 0; i < rows.length(); i++) {

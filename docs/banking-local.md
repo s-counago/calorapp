@@ -3,6 +3,8 @@
 **Actualización 05/10/2026:** Trade Republic incorpora un [cliente nativo](trade-republic-native.md)
 como acceso principal. Este documento describe la implementación previa de navegador,
 que sigue disponible como prueba. El cliente nativo tiene un almacén cifrado separado.
+Desde la versión 6.4, ABANCA utiliza un [lector específico de sus tablas](abanca-reader.md)
+con datos estructurados; conserva la captura manual de una página y su almacén cifrado.
 
 ## Decisión y alcance (4 de octubre de 2026)
 

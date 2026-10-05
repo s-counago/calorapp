@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "test:banking": "node tools/banking-reader-test.js",
+    "test:abanca": "node tools/abanca-reader-test.js",
     "test:automation": "node tools/seat-flow-smoke-test.js",
     "monitor:renfe": "node tools/renfe-seat-monitor.js",
     "monitor:renfe:check": "node tools/renfe-seat-monitor.js --once --dry-run"

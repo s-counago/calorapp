@@ -1,9 +1,12 @@
 # ABANCA: siguiente integración
 
-**Siguiente paso acordado:** inspeccionar puntualmente las consultas de red de la web
-autenticada para estudiar un cliente de sincronización. Ver
-[guía de muestra de red](abanca-network-sample.md). La captura DOM de abajo no sustituye
-ese análisis y Pausa no registra tráfico HTTP de ABANCA actualmente.
+**Capturas revisadas:** el acceso, la posición global y las consultas de cuenta y
+tarjeta están documentados en el [contrato web observado](abanca-observed-web-protocol.md).
+Los datos llegan en tablas HTML; el login capturado incluye un token reCAPTCHA.
+Ya está implementado un [lector específico con pruebas locales](abanca-reader.md),
+manteniendo el acceso interactivo. El siguiente paso es comprobarlo en el teléfono.
+La sesión, la paginación y las exportaciones aún necesitan verificación.
+Pausa no registra tráfico HTTP de ABANCA actualmente.
 
 El usuario confirma que su acceso web está desbloqueado. No se ha confirmado todavía
 en esta revisión el acceso desde WebView de Pausa ni el resultado del lector con su
@@ -19,6 +22,11 @@ normales. La captura es parcial y no acredita extracción de todos los productos
 ABANCA utiliza el user-agent normal de WebView; el experimento de identidad de escritorio
 de Trade Republic no se aplica a ABANCA. Si hay un bloqueo, detenerse y utilizar el
 navegador oficial/sistema; no encadenar nuevos intentos ni falsear más señales.
+
+Limitación detectada al revisar los HAR: las tres páginas autenticadas capturadas
+usan `#content`, mientras el lector genérico exige `main` o `[role=main]`. Desde la
+versión 6.4, ABANCA utiliza un lector específico de estas tablas con campos separados.
+No se ha probado aún la lectura con una sesión real en el teléfono.
 
 ## Automatización estable: comprobar primero el canal oficial
 

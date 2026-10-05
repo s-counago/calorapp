@@ -8,11 +8,14 @@ pero no contiene el protocolo HTTP. Pausa no registra tráfico de ABANCA actualm
 
 1. Entrar en la web oficial de ABANCA con Chrome/Edge y completar el segundo factor.
    Las credenciales se introducen en el banco, no se comparten en el chat.
-2. Abrir las herramientas de desarrollador, pestaña **Network / Red**. Desactivar
-   **Preserve log / Conservar registro** y limpiar el listado después del login.
+2. Abrir las herramientas de desarrollador, pestaña **Network / Red**. Después del
+   login, limpiar el listado y activar **Preserve log / Conservar registro** para
+   conservar la navegación entre páginas durante esta captura puntual.
    Esto reduce lo que aparece; no elimina cookies/cabeceras de las peticiones nuevas.
-3. Filtrar por **Fetch/XHR**, abrir una cuenta y consultar sus movimientos como de
-   costumbre. No hacer transferencias ni otras operaciones para esta comprobación.
+3. Seleccionar **All / Todo** y quitar los filtros de texto, abrir una cuenta y
+   consultar sus movimientos como de costumbre. Incluir las peticiones **Doc**:
+   los datos pueden llegar en HTML, no necesariamente en Fetch/XHR. No hacer
+   transferencias ni otras operaciones para esta comprobación.
 4. Localizar una respuesta que contenga los datos que aparecen en pantalla. Si el
    listado está vacío, cambiar de sección normalmente una vez; no repetir logins ni
    hacer un barrido de URLs. La web podría usar otro transporte o HTML; anotar ese
@@ -27,6 +30,26 @@ tokens CSRF, identificadores de sesión, PIN o códigos. Si un parámetro sirve 
 credencial, sustituir su valor por `[SECRETO]`; conservar el nombre permite describir
 el mecanismo sin compartir la credencial. La ruta o los parámetros también pueden
 contener datos personales o tokens: revisarlos, no solo las cabeceras.
+
+La opción de exportar un HAR «sanitized» no garantiza que se anonimicen las URLs,
+los cuerpos de petición o las respuestas. Si se comparte una muestra de HTML,
+mantener etiquetas y nombres de campos, sustituyendo datos personales y valores
+de sesión. Revisar también campos ocultos de formularios; si aparecen, ocultar los
+valores de `__VIEWSTATE`, `__EVENTVALIDATION` y tokens de verificación.
+
+## Resultado de la primera captura
+
+La muestra revisada contenía 22 peticiones (14 XHR y 8 Fetch), sin respuestas de
+tipo Document. Se identificaron publicidad, analítica y consentimiento, pero no
+una respuesta identificable de cuentas o movimientos. Los referentes apuntaban a
+una página bajo `/wele200/General/ConsultaMovimientos/…aspx`, con un parámetro `k`
+cuyo valor no se conserva aquí. Esto sugiere revisar el HTML de la navegación;
+no demuestra todavía cómo se transportan los movimientos. No se reprodujo ninguna
+petición ni se incorporó el HAR al repositorio.
+
+La captura posterior con documentos sí contiene las tablas de posición, cuenta y
+tarjeta. Ver [contrato web observado](abanca-observed-web-protocol.md). No hace falta
+repetir el login para desarrollar los parsers iniciales.
 
 ## Plantilla para compartir
 
