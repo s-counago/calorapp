@@ -38,6 +38,7 @@ public final class TradeRepublicClient implements AutoCloseable {
     private final TradeCookies cookies;
     private final OkHttpClient http;
     private JSONObject state;
+    private String securitiesAccount = "";
 
     public TradeRepublicClient(Store store, String userAgent, JSONObject device) throws Exception {
         this(store, userAgent, device, HttpUrl.get("https://api.traderepublic.com/"),
@@ -74,6 +75,7 @@ public final class TradeRepublicClient implements AutoCloseable {
                 .put("pending", state.has("processId")).put("authenticator", "AUTHENTICATOR_VERIFICATION".equals(state.optString("requiredAction")))
                 .put("expiresAt", state.optLong("expiresAt"));
         if (state.has("snapshot")) result.put("snapshot", new JSONObject(state.getJSONObject("snapshot").toString()));
+        if (state.has("portfolio")) result.put("portfolio", new JSONObject(state.getJSONObject("portfolio").toString()));
         return result;
     }
 
@@ -83,7 +85,8 @@ public final class TradeRepublicClient implements AutoCloseable {
         if (state.has("processId") && state.optLong("expiresAt") > System.currentTimeMillis())
             throw new TradeException("PENDING", "Ya hay un acceso pendiente. Confírmalo o cancélalo antes de empezar otro.");
         // Explicit new connection; never mix snapshots or cookies from different accounts.
-        cookies.clear(); clearProcess(); state.remove("snapshot"); state.put("connected", false); persist();
+        cookies.clear(); clearProcess(); state.remove("snapshot"); state.remove("portfolio"); securitiesAccount = "";
+        state.put("connected", false); persist();
         String version = fetchAppVersion();
         state.put("appVersion", version); persist();
         JSONObject response = request("POST", "/api/v2/auth/web/login",
@@ -139,14 +142,35 @@ public final class TradeRepublicClient implements AutoCloseable {
     }
 
     public synchronized void disconnect() throws Exception {
-        clearProcess(); cookies.clear(); state.put("connected", false); state.remove("snapshot"); persist();
+        clearProcess(); cookies.clear(); state.put("connected", false); state.remove("snapshot"); state.remove("portfolio");
+        securitiesAccount = ""; persist();
     }
 
     public synchronized void verifySession() throws Exception {
         request("GET", "/api/v1/auth/web/session", null, false);
         JSONObject account = request("GET", "/api/v2/auth/account", null, false);
         if (account.length() == 0 || cookies.loadForRequest(api).isEmpty()) throw TradeException.protocol();
+        securitiesAccount = account.optString("securitiesAccountNumber", "");
         state.put("connected", true); clearProcess(); persist();
+    }
+
+    public synchronized void syncPortfolio() throws Exception {
+        if (state.has("processId")) throw new TradeException("PENDING", "Completa primero la confirmación del acceso.");
+        verifySession();
+        if (securitiesAccount.isEmpty() || securitiesAccount.equals("null") || securitiesAccount.length() > 100)
+            throw new TradeException("NO_SECURITIES_ACCOUNT", "El banco no ha proporcionado una cuenta de valores. Se conserva la cartera anterior.");
+        JSONObject portfolio;
+        try (TradeSocket socket = new TradeSocket(http, new Request.Builder().url(api).header("User-Agent", userAgent).build())) {
+            socket.connect();
+            JSONArray positions;
+            try { positions = TradePortfolio.normalize(socket.readPortfolio(securitiesAccount)); }
+            catch (org.json.JSONException error) { throw TradeException.protocol(); }
+            portfolio = new JSONObject().put("capturedAt", System.currentTimeMillis()).put("positions", positions);
+        }
+        JSONObject previous = state.optJSONObject("portfolio");
+        state.put("portfolio", portfolio);
+        try { persist(); }
+        catch (Exception error) { if (previous == null) state.remove("portfolio"); else state.put("portfolio", previous); throw error; }
     }
 
     public synchronized void sync() throws Exception {

@@ -36,9 +36,17 @@ final class TradeSocket extends WebSocketListener implements AutoCloseable {
     Object read(String topic, String cursor) throws Exception {
         if (!topic.equals("cash") && !topic.equals("timelineTransactions") && !topic.equals("timelineActivityLog"))
             throw new IllegalArgumentException("Unsupported read topic");
-        int id = ++nextId;
         JSONObject payload = new JSONObject().put("type", topic);
         if (cursor != null) payload.put("after", cursor);
+        return readPayload(payload);
+    }
+
+    Object readPortfolio(String securitiesAccount) throws Exception {
+        return readPayload(new JSONObject().put("type", "compactPortfolioByType").put("secAccNo", securitiesAccount));
+    }
+
+    private Object readPayload(JSONObject payload) throws Exception {
+        int id = ++nextId;
         send("sub " + id + " " + payload);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(25);
         try {

@@ -10,8 +10,8 @@ android {
         applicationId "com.sejio.calorapp"
         minSdk 23
         targetSdk 35
-        versionCode 18
-        versionName "6.1"
+        versionCode 19
+        versionName "6.2"
         testInstrumentationRunner project.findProperty("uiTestRunner") ?: "com.sejio.calorapp.PlannerSmokeTest"
     }
 

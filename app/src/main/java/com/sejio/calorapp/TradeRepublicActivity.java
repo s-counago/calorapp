@@ -22,12 +22,13 @@ import java.util.Date;
 public final class TradeRepublicActivity extends Activity implements TradeRepository.Listener {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TradeRepository repository;
-    private LinearLayout loginPanel, pendingPanel, connectedPanel, history;
+    private LinearLayout loginPanel, pendingPanel, connectedPanel, history, portfolioHistory;
     private EditText phone, pin, code;
     private TextView status, pendingText;
-    private Button login, check, verify, sync, cancel, forget;
+    private Button login, check, verify, sync, portfolioSync, cancel, forget;
     private boolean active;
     private long shownCapture = -1;
+    private long shownPortfolio = -1;
     private final Runnable poll = () -> {
         JSONObject state = repository.current();
         if (active && state != null && state.optBoolean("pending") && !state.optBoolean("authenticator")
@@ -67,12 +68,16 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
 
         connectedPanel = column(); root.addView(connectedPanel);
         sync = PausaUi.action(this, "Sincronizar saldo y movimientos", true, () -> repository.execute(c -> c.sync())); connectedPanel.addView(sync);
+        portfolioSync = PausaUi.action(this, "Consultar posiciones de inversión", true, () -> repository.execute(c -> c.syncPortfolio()));
+        connectedPanel.addView(portfolioSync);
+        connectedPanel.addView(label("Las posiciones se consultan por separado, solo al pulsar su botón. No se actualizan cotizaciones en directo.", false));
         connectedPanel.addView(label("Consulta al banco al pulsar Sincronizar. Los datos guardados se pueden leer sin conexión.", false));
         forget = PausaUi.quiet(this, "Olvidar conexión y datos locales", PausaUi.TERRACOTTA, () -> {
             new AlertDialog.Builder(this).setTitle("¿Olvidar Trade Republic en Pausa?")
                     .setMessage("Borra la sesión y los datos descargados de este cliente. No revoca la sesión en el banco.")
                     .setNegativeButton("Cancelar", null).setPositiveButton("Olvidar", (d, w) -> repository.forget()).show();
         }); root.addView(forget);
+        portfolioHistory = column(); root.addView(portfolioHistory);
         history = column(); root.addView(history);
         loginPanel.setVisibility(View.GONE); pendingPanel.setVisibility(View.GONE); connectedPanel.setVisibility(View.GONE);
     }
@@ -93,7 +98,7 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
         connectedPanel.setVisibility(connected && !pending ? View.VISIBLE : View.GONE);
         code.setVisibility(authenticator ? View.VISIBLE : View.GONE); verify.setVisibility(authenticator ? View.VISIBLE : View.GONE);
         check.setVisibility(authenticator ? View.GONE : View.VISIBLE);
-        for (Button button : new Button[]{login, check, verify, sync, cancel, forget}) button.setEnabled(!busy);
+        for (Button button : new Button[]{login, check, verify, sync, portfolioSync, cancel, forget}) button.setEnabled(!busy);
         phone.setEnabled(!busy); pin.setEnabled(!busy); code.setEnabled(!busy);
         if (!error.isEmpty()) status.setText(error);
         else if (busy) status.setText("Consultando Trade Republic…");
@@ -107,6 +112,29 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
             if (!busy && !authenticator && error.isEmpty()) handler.postDelayed(poll, 2500);
         }
         showHistory(view == null ? null : view.optJSONObject("snapshot"));
+        showPortfolio(view == null ? null : view.optJSONObject("portfolio"));
+    }
+
+    private void showPortfolio(JSONObject portfolio) {
+        long captured = portfolio == null ? 0 : portfolio.optLong("capturedAt");
+        if (captured == shownPortfolio) return;
+        shownPortfolio = captured; portfolioHistory.removeAllViews();
+        if (portfolio == null) return;
+        portfolioHistory.addView(PausaUi.editorial(this, "Posiciones de inversión", 24));
+        portfolioHistory.addView(label("Consulta: " + DateFormat.getDateTimeInstance().format(new Date(captured)), true));
+        portfolioHistory.addView(label("Identificadores y cantidades de la cuenta de valores. Esta lista no acredita cobertura de todos los productos; no incluye cotizaciones ni valoración actual.", false));
+        JSONArray rows = portfolio.optJSONArray("positions");
+        if (rows == null) return;
+        if (rows.length() == 0) portfolioHistory.addView(label("El banco devolvió una lista de posiciones vacía para esta cuenta de valores.", false));
+        for (int i = 0; i < Math.min(100, rows.length()); i++) {
+            JSONObject row = rows.optJSONObject(i); if (row == null) continue;
+            String currency = row.optString("currency");
+            String cost = row.has("averageBuyIn") ? row.optString("averageBuyIn")
+                    + (currency.isEmpty() ? " (moneda no indicada)" : " " + currency) : "No indicado";
+            portfolioHistory.addView(label(row.optString("instrumentId") + "\nCantidad: " + row.optString("quantity")
+                    + "\nPrecio medio de compra: " + cost, false));
+        }
+        if (rows.length() > 100) portfolioHistory.addView(label("Mostrando 100 de " + rows.length() + " posiciones guardadas.", false));
     }
 
     private void showHistory(JSONObject snapshot) {

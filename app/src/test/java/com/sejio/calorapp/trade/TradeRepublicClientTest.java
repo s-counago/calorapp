@@ -281,4 +281,53 @@ public class TradeRepublicClientTest {
             catch (TradeException expected) { assertEquals("PROTOCOL", expected.code); }
         }
     }
+
+    @Test public void portfolioUsesOneSubscriptionAndKeepsCashSnapshotSeparate() throws Exception {
+        store.state = new JSONObject().put("schema", 1).put("deviceId", new String(new char[128]).replace('\0', 'a'))
+                .put("snapshot", new JSONObject().put("capturedAt", 123)); client = client();
+        sessionResponses();
+        java.util.List<String> commands = new java.util.concurrent.CopyOnWriteArrayList<>();
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            @Override public void onMessage(WebSocket ws, String text) {
+                commands.add(text);
+                if (text.startsWith("connect")) ws.send("connected");
+                else if (text.startsWith("sub ")) ws.send("1 A {\"categories\":[{\"positions\":[{\"isin\":\"TEST_ISIN\",\"netSize\":\"1.25\",\"averageBuyIn\":\"10\"}]}]}");
+            }
+        }));
+        client.syncPortfolio();
+        assertEquals(3, server.getRequestCount()); // session, account, one socket handshake
+        assertEquals("1.25", client.view().getJSONObject("portfolio").getJSONArray("positions").getJSONObject(0).getString("quantity"));
+        assertEquals(123, client.view().getJSONObject("snapshot").getInt("capturedAt"));
+        int subscriptions = 0;
+        for (String command : commands) if (command.startsWith("sub ")) {
+            subscriptions++;
+            JSONObject payload = new JSONObject(command.split(" ", 3)[2]);
+            assertEquals("compactPortfolioByType", payload.getString("type"));
+            assertEquals("TEST_ACCOUNT", payload.getString("secAccNo"));
+        }
+        assertEquals(1, subscriptions);
+        assertFalse(store.state.toString().contains("TEST_ACCOUNT"));
+    }
+
+    @Test public void unknownPortfolioSchemaPreservesPreviousPortfolio() throws Exception {
+        store.state = new JSONObject().put("schema", 1).put("deviceId", new String(new char[128]).replace('\0', 'a'))
+                .put("portfolio", new JSONObject().put("capturedAt", 456)); client = client();
+        sessionResponses();
+        server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+            @Override public void onMessage(WebSocket ws, String text) {
+                if (text.startsWith("connect")) ws.send("connected");
+                else if (text.startsWith("sub ")) ws.send("1 A {\"unknown\":[]}");
+            }
+        }));
+        try { client.syncPortfolio(); fail(); } catch (TradeException e) { assertEquals("PROTOCOL", e.code); }
+        assertEquals(456, client.view().getJSONObject("portfolio").getInt("capturedAt"));
+        assertEquals(456, store.state.getJSONObject("portfolio").getInt("capturedAt"));
+    }
+
+    @Test public void missingSecuritiesAccountStopsBeforeOpeningSocket() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(204).setHeader("Set-Cookie", "session=TEST; Path=/"));
+        json("{\"someOtherAccountField\":true}");
+        try { client.syncPortfolio(); fail(); } catch (TradeException e) { assertEquals("NO_SECURITIES_ACCOUNT", e.code); }
+        assertEquals(2, server.getRequestCount());
+    }
 }

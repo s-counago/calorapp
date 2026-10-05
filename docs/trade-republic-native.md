@@ -5,7 +5,7 @@ Se entra por **Banca → Trade Republic → Conectar y sincronizar**. Usa el pro
 de la web, sin WebView. La prueba anterior de navegador conserva sus propios perfiles;
 no comparte cookies ni datos con este cliente. ABANCA sigue con su implementación previa.
 
-La APK de prueba se llama **Pausa Banking · TR nativo**, versión 6.1-banking-tr (18),
+La APK de prueba se llama **Pausa Banking · TR nativo**, versión 6.2-banking-tr (19),
 con el mismo ID `com.sejio.calorapp.bankingua` y firma de la prueba anterior.
 
 ## Uso y alcance
@@ -31,7 +31,21 @@ contabilizados. Los importes se guardan como cadenas decimales, con límites de 
 y escala. Una descarga completa y guardada sustituye la anterior: todavía no es una
 base histórica incremental. Si falla una consulta, se conserva la descarga anterior.
 
-No incluye posiciones/cartera, cotizaciones, documentos, detalles completos de movimientos,
+El botón separado **Consultar posiciones de inversión** valida la sesión (dos GET),
+abre un WebSocket y obtiene una única respuesta `compactPortfolioByType`, asociada al
+`securitiesAccountNumber` devuelto por el banco. No se repiten las consultas de saldo
+y movimientos, no se hace una petición por instrumento y no se mantienen cotizaciones
+abiertas. La nueva copia de posiciones se guarda con fecha propia, sin sustituir el
+saldo ni la actividad; una respuesta inválida conserva la cartera anterior.
+
+Se muestran identificador, cantidad (incluidas fracciones) y precio medio de compra
+si está informado. La referencia no garantiza nombre comercial ni moneda: no se
+infiere EUR a partir del efectivo, ni se inventan valoraciones. Se aceptan hasta 500
+posiciones y se muestran 100; un exceso se rechaza, sin sustituir la copia anterior por
+una truncada. Una lista vacía no se confunde con un esquema desconocido. La cobertura
+de todos los productos de inversión queda pendiente de contrastar con la cuenta real.
+
+No incluye cotizaciones/valoración actual, documentos, detalles completos de movimientos,
 transferencias, operaciones de compra/venta ni sincronización periódica en segundo plano.
 No hay backend, Python, automatización de navegador ni puente JavaScript.
 
@@ -78,6 +92,7 @@ y sus ejemplos públicos de eventos. Véase el aviso de licencia en
 | Autenticador | `POST /api/v2/auth/web/login/processes/{id}/authenticator-verification` |
 | Sesión | `GET /api/v1/auth/web/session` y `GET /api/v2/auth/account` |
 | Datos | WebSocket al origen API, `connect 31`, suscripciones `cash`, `timelineTransactions`, `timelineActivityLog` |
+| Posiciones, consulta separada | `compactPortfolioByType` con `secAccNo`, una respuesta y desuscripción |
 
 Se envían las cabeceras de identificación del flujo web v2. Se lee `app-version` del
 HTML público al iniciar una conexión, con respaldo 2.2640.20 comprobado el 05/10/2026.
@@ -89,7 +104,8 @@ de intentos se detiene; no se intenta resolver ni eludir un desafío WAF.
 
 ## Validación
 
-Resultado del 05/10/2026: **17 pruebas JVM, 0 fallos**; compilación de `bankingUa`
+Resultado del 05/10/2026: **25 pruebas JVM, 0 fallos**, incluidas ocho de cartera;
+compilación de `bankingUa`
 correcta; lint con **0 errores y 100 avisos** (incluidos textos sin recursos de
 traducción). Las pruebas existentes de política de orígenes/perfiles y modos A/B/C
 también pasan. APK verificada con `apksigner`, mismo certificado que la prueba anterior,
@@ -104,8 +120,25 @@ Cubren reanudación del proceso y de una aprobación, errores/caducidad/limitaci
 autenticador, redirecciones, persistencia, aislamiento de cookies, paginación,
 deduplicación, importes y conservación de la copia anterior ante respuestas inválidas.
 
-No se ha autenticado una cuenta bancaria real durante el desarrollo. Las pruebas JVM
+El usuario ha comunicado que el acceso y los saldos básicos funcionan en su teléfono.
+Esto no acredita movimientos, cartera, todos los productos ni estabilidad futura.
+No se ha autenticado una cuenta bancaria real desde el entorno de desarrollo. Las pruebas JVM
 no ejecutan Android Keystore ni el ciclo de vida Android: quedan pendientes la prueba
 en teléfono, el cambio a la app bancaria y la comparación del saldo y movimientos con
 la aplicación oficial. Para reportar un fallo basta la fase y el código visible entre
 corchetes, sin PIN, códigos de aprobación, cookies ni respuestas bancarias.
+
+### Pruebas y controles del banco
+
+Los casos de cartera usan respuestas sintéticas construidas según `api.py` y
+`portfolio.py` de la referencia fijada. Prueban el código de Pausa, no la compatibilidad
+con una cuenta real. No se mandan credenciales ficticias a Trade Republic ni se ejecutan
+baterías de pruebas contra su API. La prueba real pendiente consiste en una consulta
+manual desde el teléfono y comparación de posiciones conocidas con la app oficial.
+
+Se conserva la identificación de compatibilidad web ya utilizada; no se afirma que
+Pausa se identifique como una integración oficial. Se reutiliza el dispositivo/sesión,
+no se rotan identidades, no se simulan gestos humanos, no hay tareas de mantenimiento
+de sesión ni consultas de inversión automáticas. Se detiene ante errores, límites o
+desafíos. Una frecuencia baja por sí sola no garantiza evitar controles ni acredita
+que el banco admita este cliente no oficial.
