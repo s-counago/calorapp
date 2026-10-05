@@ -49,12 +49,17 @@ final class TradeRepository {
         submit(() -> {
             if (client == null) client = createClient();
             work.run(client);
+            try { BankingDatabase.get(context).trade(client.view()); }
+            catch (Exception failure) {
+                throw new TradeException("DATABASE", "La consulta sigue en la copia cifrada, pero no se pudo incorporarla a la base de datos. Se volverá a intentar al abrir Trade Republic.");
+            }
         });
     }
 
     void forget() {
         submit(() -> {
             // Recovery also works when an unreadable vault prevented client construction.
+            BankingDatabase.get(context).deleteBank("trade_republic");
             new TradeVault(context).erase();
             if (client != null) client.close();
             client = null; view = null;

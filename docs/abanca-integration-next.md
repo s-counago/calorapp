@@ -1,5 +1,8 @@
 # ABANCA: siguiente integración
 
+**Estado actual 6.5:** [sincronización automática y persistencia SQLite](banking-database.md),
+con soporte de tarjeta de crédito y préstamo. El CSV es solo una referencia, sin importador.
+
 **Capturas revisadas:** el acceso, la posición global y las consultas de cuenta y
 tarjeta están documentados en el [contrato web observado](abanca-observed-web-protocol.md).
 Los datos llegan en tablas HTML; el login capturado incluye un token reCAPTCHA.

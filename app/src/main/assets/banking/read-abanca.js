@@ -1,5 +1,5 @@
 /* ABANCA HTML reader. Passive: no requests, clicks, form values, URLs in output,
- * cookies or storage. Only known tables from three authenticated page layouts.
+ * cookies or storage. Only known tables from authenticated page layouts.
  */
 (() => {
   'use strict';
@@ -7,7 +7,8 @@
   const paths = {
     '/wele200/general/posicion/wele200m_posicion.aspx': 'overview',
     '/wele200/general/consultamovimientos/wele200m_consultamovimientos_res.aspx': 'account',
-    '/wele200/tarjetas/movimientostarjeta/wele200m_movimientostarjeta_ini.aspx': 'card'
+    '/wele200/tarjetas/movimientostarjeta/wele200m_movimientostarjeta_ini.aspx': 'card',
+    '/wele200/prestamos/consulta/wele200m_consultaprestamo_ini.aspx': 'loan'
   };
   if (location.protocol !== 'https:' || location.hostname !== 'bancaelectronica.abanca.com' ||
       (location.port && location.port !== '443')) return unsupported();
@@ -17,11 +18,17 @@
     getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none';
   if ([...document.querySelectorAll('input[type="password"], input[name="pin_number"], input[autocomplete="one-time-code"]')]
     .some(visible)) return {status: 'authentication_required'};
+  if ([...document.querySelectorAll('iframe')].some(frame => visible(frame) &&
+    /\/recaptcha\//i.test(frame.getAttribute('src') || '') &&
+    frame.getBoundingClientRect().width > 200 && frame.getBoundingClientRect().height > 100))
+    return {status: 'authentication_required'};
   const pageType = paths[location.pathname.toLowerCase()];
   const root = document.querySelector('#content');
   if (!pageType || !root || !visible(root) || root.closest(excluded)) return unsupported();
   let truncated = false, omittedRows = 0;
   const records = [];
+  const sourceTables = [];
+  let sourceCharacters = 0, sourceTruncated = false;
   const text = (el, limit = 240) => {
     if (!visible(el) || el.closest(excluded)) return '';
     const parts = [];
@@ -41,6 +48,25 @@
   };
   const normalized = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const collectSource = (table, key, title) => {
+    const index = sourceTables.length;
+    const source = {key, title, rows: []};
+    sourceTables.push(source);
+    for (const row of table.rows) {
+      if (!visible(row) || row.closest(excluded)) continue;
+      if (source.rows.length >= 2001) { sourceTruncated = true; break; }
+      const cells = [...row.cells].slice(0, 8).map((cell, column) => ({
+        column, text: text(cell, 4096), colspan: cell.colSpan, header: cell.tagName === 'TH'
+      }));
+      if (row.cells.length > 8 || cells.some(cell => cell.text.length === 4096 && cell.text.endsWith('…'))) sourceTruncated = true;
+      const captured = {index: row.rowIndex, cells};
+      const length = JSON.stringify(captured).length;
+      if (sourceCharacters + length > 150000) { sourceTruncated = true; break; }
+      sourceCharacters += length;
+      source.rows.push(captured);
+    }
+    return index;
+  };
   const headersMatch = (table, expected) => {
     const row = table.rows[0];
     return row && [...row.cells].every(cell => cell.tagName === 'TH') &&
@@ -88,8 +114,10 @@
       const table = root.querySelector(`table#${id}`);
       if (!table || !visible(table)) continue;
       if (!headersMatch(table, headers)) return unsupported();
+      const sourceTable = collectSource(table, id, text(table.rows[0].cells[1], 80));
       recognized++;
       for (const row of [...table.rows].slice(1)) {
+        if (records.length >= 200) { truncated = true; break; }
         if (!visible(row) || row.closest(excluded)) continue;
         const link = row.querySelector(`a[id$="${suffix}"]`);
         // Totals and empty placeholders are not separate products.
@@ -100,8 +128,36 @@
           const label = text(link, 120), kind = text(cells[2], 80);
           const balance = money(cells[4]);
           if (!label || !balance) throw new Error('product');
-          append({productType, label, kind, balance, limit: productType === 'account' ? null : money(cells[3])});
+          append({productType, label, kind, balance, limit: productType === 'account' ? null : money(cells[3]),
+            sourceTable, sourceRow: row.rowIndex});
         } catch (_) { omittedRows++; }
+      }
+    }
+    if (!recognized) return unsupported();
+  } else if (pageType === 'loan') {
+    const sections = new Set(['DATOSDELPRESTAMO', 'DATOSGENERALES', 'PENDIENTEDEPAGO', 'CONDICIONES']);
+    let recognized = 0;
+    for (const table of root.querySelectorAll('table.search_movements')) {
+      if (!visible(table) || table.closest(excluded)) continue;
+      const section = text(table.rows[0]?.cells[0], 80);
+      if (!sections.has(normalized(section))) return unsupported();
+      const sourceTable = collectSource(table, 'loan-' + recognized, section);
+      recognized++;
+      let group = '';
+      for (const row of [...table.rows].slice(1)) {
+        if (records.length >= 200) { truncated = true; break; }
+        if (!visible(row) || row.closest(excluded)) continue;
+        const c = [...row.cells];
+        if (row.classList.contains('summary') && c.length === 1 && c[0].colSpan === 2) {
+          group = text(c[0], 120); continue;
+        }
+        if (c.length !== 2 || !c[0].classList.contains('title') || !c[1].classList.contains('desc')) {
+          omittedRows++; continue;
+        }
+        const label = text(c[0], 80), value = text(c[1], 240);
+        if (!label || !value) { omittedRows++; continue; }
+        // Rates, dates, counts and money retain their original units and section context.
+        append({section, group, label, value, sourceTable, sourceRow: row.rowIndex});
       }
     }
     if (!recognized) return unsupported();
@@ -109,11 +165,14 @@
     const tables = [...root.querySelectorAll('table.movements')].filter(visible);
     if (tables.length !== 1) return unsupported();
     const table = tables[0];
-    const expected = pageType === 'account'
+    let expected = pageType === 'account'
       ? ['FOPERAC', 'FVALOR', 'DESCRIPCION', 'IMPORTE', 'SALDO']
       : ['', 'FOPERAC', 'TIPOOPERACION', 'SITUACION', 'CONCEPTO', 'IMPORTE', 'FPAGO'];
+    if (pageType === 'card' && table.rows[0]?.cells.length === 6) expected = expected.slice(0, 6);
     if (!headersMatch(table, expected)) return unsupported();
+    const sourceTable = collectSource(table, 'movements', pageType === 'card' ? 'Movimientos de tarjeta' : 'Movimientos de cuenta');
     for (const row of [...table.rows].slice(1)) {
+      if (records.length >= 200) { truncated = true; break; }
       if (!visible(row) || row.closest(excluded)) continue;
       try {
         const c = [...row.cells];
@@ -125,15 +184,16 @@
         if (pageType === 'account') {
           const balance = money(c[4]);
           if (!balance) throw new Error('balance');
-          append({operationDate: date(c[0]), valueDate: date(c[1]), description, amount, balance});
+          append({operationDate: date(c[0]), valueDate: date(c[1]), description, amount, balance,
+            sourceTable, sourceRow: row.rowIndex});
         } else {
           append({operationDate: date(c[1]), operationType: text(c[2], 80), situation: text(c[3], 80),
-            description, amount, payment: text(c[6], 80)});
+            description, amount, payment: c.length === 7 ? text(c[6], 80) : '',
+            sourceTable, sourceRow: row.rowIndex});
         }
       } catch (_) { omittedRows++; }
     }
   }
-  if (!records.length) return {status: 'no_records'};
-  return {status: 'captured', reader: 'abanca-html-v1', pageType, partial: true,
-    truncated, omittedRows, records};
+  return {status: records.length ? 'captured' : 'no_records', reader: 'abanca-html-v1', pageType, partial: true,
+    truncated, omittedRows, records, sourceTables, sourceTruncated};
 })()

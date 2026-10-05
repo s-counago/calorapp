@@ -1,5 +1,8 @@
 # ABANCA: lectura estructurada en el teléfono
 
+**Actualización 6.5:** la lectura automática y SQLite están descritos en
+[banking-database.md](banking-database.md). Lo siguiente documenta la prueba manual 6.4.
+
 Versión de prueba 6.4-banking-tr, código 21. Mantiene el identificador y la clave
 de firma de las pruebas anteriores. El cliente nativo de Trade Republic no cambia.
 
@@ -53,6 +56,10 @@ Puede contener fechas, importes, conceptos e identificadores de movimientos, seg
 lo que exporte el banco. El enlace OFX observado requiere sesión web; no evita
 reCAPTCHA ni ofrece acceso permanente. No se ha descargado una muestra ni implementado
 su importación.
+
+Actualización: el usuario aportó un CSV tras fallar OFX. Su
+[formato ya está documentado](abanca-csv-sample.md) y es suficiente para desarrollar
+la importación de un extracto de cuenta. La APK 6.4 aún no incluye ese importador.
 
 Primero validar estas pantallas en WebView. Después, estudiar una sincronización
 iniciada por el usuario que descubra los enlaces de consulta de la sesión actual,

@@ -10,12 +10,6 @@ import android.widget.ScrollView;
 import androidx.webkit.ProfileStore;
 import androidx.webkit.WebViewFeature;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.text.DateFormat;
-import java.util.Date;
-
 /** Offline-first landing page: viewing snapshots never creates or refreshes a bank session. */
 final class BankingView extends LinearLayout {
     private final LinearLayout content;
@@ -54,64 +48,28 @@ final class BankingView extends LinearLayout {
             paragraph(card, "Cliente directo: confirma el acceso en Trade Republic y vuelve para consultar saldo y movimientos.", false);
             card.addView(PausaUi.action(context, "Conectar y sincronizar", true, () -> context.startActivity(
                     new Intent(context, TradeRepublicActivity.class))));
+            card.addView(PausaUi.quiet(context, "Consultas guardadas en la base de datos", PausaUi.GREEN, () -> context.startActivity(
+                    new Intent(context, AbancaArchiveActivity.class).putExtra(AbancaArchiveActivity.EXTRA_BANK, bank.id))));
             card.addView(PausaUi.quiet(context, "Prueba anterior en navegador", PausaUi.GREEN, () -> context.startActivity(
                     new Intent(context, BankBrowserActivity.class).putExtra(BankBrowserActivity.EXTRA_BANK, bank.id))));
             card.addView(PausaUi.quiet(context, "Olvidar sesiones de la prueba anterior", PausaUi.TERRACOTTA, () -> confirmForget(bank)));
             return;
         }
-        JSONObject snapshot = null;
-        boolean failed = false;
-        try { snapshot = BankSnapshotStore.load(context, bank); }
-        catch (Exception error) { failed = true; }
-        if (failed) paragraph(card, "No se pudo leer la captura guardada. Puedes volver a capturar desde el banco o borrar esa copia.", false);
-        else if (snapshot == null) paragraph(card, "Aún no hay datos guardados. Abre el banco e inicia sesión allí.", false);
-        else {
-            String date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(new Date(snapshot.optLong("capturedAt")));
-            paragraph(card, "Última captura: " + date, true);
-            if (AbancaSnapshot.READER.equals(snapshot.optString("reader"))) {
-                paragraph(card, AbancaSnapshot.title(snapshot), true);
-                if (snapshot.optInt("omittedRows") > 0) paragraph(card,
-                        snapshot.optInt("omittedRows") + " filas no se pudieron interpretar y se han omitido.", false);
-            }
-            paragraph(card, "Captura parcial de una página; no es un saldo consolidado ni un historial completo. Una nueva captura sustituye esta copia.", false);
-            if (snapshot.optBoolean("truncated")) paragraph(card, "Se alcanzó el límite de la captura: algunos datos se han recortado.", false);
-            JSONArray rows = snapshot.optJSONArray("rows");
-            if (rows != null) {
-                int preview = Math.min(rows.length(), 5);
-                for (int i = 0; i < preview; i++) paragraph(card, rows.optString(i), false);
-                final JSONObject saved = snapshot;
-                if (rows.length() > preview) card.addView(PausaUi.quiet(context, "Ver los " + rows.length() + " registros", PausaUi.GREEN, () -> showSnapshot(saved)));
-            }
-        }
-        card.addView(PausaUi.action(context, "Abrir " + bank.label, true, () -> context.startActivity(
+        card.addView(PausaUi.action(context, "Conectar y sincronizar ABANCA", true, () -> context.startActivity(
+                new Intent(context, BankBrowserActivity.class).putExtra(BankBrowserActivity.EXTRA_BANK, bank.id)
+                        .putExtra(BankBrowserActivity.EXTRA_SYNC, true))));
+        card.addView(PausaUi.action(context, "Ver sincronizaciones", false, () -> context.startActivity(
+                new Intent(context, AbancaArchiveActivity.class))));
+        paragraph(card, "Completa el acceso si lo pide. Pausa consulta los productos y conserva cada lectura en la base de datos del teléfono.", false);
+        card.addView(PausaUi.quiet(context, "Abrir solo la web", PausaUi.GREEN, () -> context.startActivity(
                 new Intent(context, BankBrowserActivity.class).putExtra(BankBrowserActivity.EXTRA_BANK, bank.id))));
-        paragraph(card, "La sesión se reutiliza si sigue vigente. El banco puede pedirte el acceso o una verificación de nuevo.", false);
         card.addView(PausaUi.quiet(context, "Olvidar sesión en este teléfono", PausaUi.TERRACOTTA, () -> confirmForget(bank)));
-        if (snapshot != null || failed) card.addView(PausaUi.quiet(context, "Borrar captura", PausaUi.TERRACOTTA, () ->
-                new AlertDialog.Builder(context).setTitle("¿Borrar la captura de " + bank.label + "?")
-                        .setMessage("La sesión del banco se conserva.").setNegativeButton("Cancelar", null)
-                        .setPositiveButton("Borrar", (dialog, which) -> { BankSnapshotStore.delete(context, bank); refresh(); }).show()));
-    }
-
-    private void showSnapshot(JSONObject data) {
-        LinearLayout rows = new LinearLayout(getContext());
-        rows.setOrientation(VERTICAL);
-        rows.setPadding(dp(20), dp(12), dp(20), dp(12));
-        JSONArray values = data.optJSONArray("rows");
-        if (values != null) for (int i = 0; i < values.length(); i++) paragraph(rows, values.optString(i), false);
-        ScrollView scroll = new ScrollView(getContext());
-        scroll.addView(rows);
-        AlertDialog dialog = new AlertDialog.Builder(getContext()).setTitle(
-                AbancaSnapshot.title(data) + " · captura parcial")
-                .setView(scroll).setPositiveButton("Cerrar", null).create();
-        dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
-        dialog.show();
     }
 
     private void confirmForget(BankProvider bank) {
         new AlertDialog.Builder(getContext()).setTitle("¿Olvidar la sesión de " + bank.label + "?")
                 .setMessage("Se eliminarán las cookies y los datos del navegador de este banco en Pausa. La captura guardada se conserva. "
-                        + "Esto no revoca la sesión en el banco; para eso utiliza sus opciones de seguridad.")
+                        + "Las consultas de la base de datos también se conservan. Esto no revoca la sesión en el banco; para eso utiliza sus opciones de seguridad.")
                 .setNegativeButton("Cancelar", null)
                 .setPositiveButton("Olvidar", (dialog, which) -> forget(bank)).show();
     }

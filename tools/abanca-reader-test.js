@@ -9,7 +9,8 @@ const origin = 'https://bancaelectronica.abanca.com';
 const routes = {
   overview: '/wele200/General/Posicion/WELE200M_Posicion.aspx',
   account: '/wele200/General/ConsultaMovimientos/WELE200M_ConsultaMovimientos_Res.aspx',
-  card: '/wele200/Tarjetas/MovimientosTarjeta/WELE200M_MovimientosTarjeta_Ini.aspx'
+  card: '/wele200/Tarjetas/MovimientosTarjeta/WELE200M_MovimientosTarjeta_Ini.aspx',
+  loan: '/wele200/Prestamos/Consulta/WELE200M_ConsultaPrestamo_Ini.aspx'
 };
 const head = labels => '<tr>' + labels.map(v => `<th>${v}</th>`).join('') + '</tr>';
 const money = v => `<span>${v}<span class="currency">EUR</span></span>`;
@@ -83,8 +84,31 @@ const overview = () => `<div id="content">
     assert.equal(data.records[0].payment, 'Próxima liquidación');
     assert.equal(data.records[0].operationType, 'Compra');
     assert.equal(data.records[0].amount.amount, '-8.90');
-    for (const key of ['Titular ficticio', 'DO_NOT_STORE', 'valueDate', 'balance'])
+    assert.ok(JSON.stringify(data.sourceTables).includes('Titular ficticio'), 'original table retains the holder text'); checks++;
+    for (const key of ['DO_NOT_STORE', 'valueDate', 'balance'])
       assert.ok(!JSON.stringify(data).includes(key)); checks += 8;
+
+    data = await read(card(cardRow()).replace('<th>F.PAGO</th>', '').replace('<td>Próxima liquidación</td>', ''), 'card');
+    assert.equal(data.status, 'captured');
+    assert.equal(data.records[0].payment, '');
+    assert.equal(data.sourceTables[0].rows[0].cells.length, 6); checks += 3;
+    data = await read('<div id="content"><table class="search_movements">' + head(['Condiciones', '']) +
+      '<tr><td class="title">SALDO</td><td class="desc">3.000,00 EUR</td></tr>' +
+      '<tr><td class="title">INTERÉS NOMINAL</td><td class="desc">4,25 %</td></tr></table>' +
+      '<table class="search_movements multi_level">' + head(['Pendiente de pago', '']) +
+      '<tr class="summary"><td colspan="2">RECIBOS PENDIENTES DE PAGO</td></tr>' +
+      '<tr><td class="title">IMPORTE</td><td class="desc">0,00 EUR</td></tr></table></div>', 'loan');
+    assert.equal(data.records.length, 3);
+    assert.equal(data.records[1].value, '4,25 %');
+    assert.equal(data.records[2].group, 'RECIBOS PENDIENTES DE PAGO');
+    assert.equal(data.records[2].sourceTable, 1);
+    assert.equal(data.records[2].sourceRow, 2);
+    assert.equal(data.sourceTables[1].rows[1].cells[0].colspan, 2); checks += 6;
+    await read(overview(), 'overview');
+    const discovery = await page.evaluate(fs.readFileSync(path.join(__dirname, '../app/src/main/assets/banking/abanca-links.js'), 'utf8'));
+    assert.equal(discovery.status, 'ready');
+    assert.equal(discovery.targets[0].type, 'account');
+    assert.ok(discovery.targets[0].url.includes('DO_NOT_STORE'), 'tokens exist only in transient navigation targets'); checks += 3;
 
     for (const [value, expected] of [['−12,50', '-12.50'], ['+12,50', '12.50'], ['0,00', '0.00'],
       ['-0,00', '0.00'], ['1.234.567,89', '1234567.89'], ['999999999999999999,99', '999999999999999999.99']]) {
@@ -131,6 +155,7 @@ const overview = () => `<div id="content">
     data = await read(account(accountRow('-1,00', '05/10/2026', 'Texto '.repeat(100))));
     assert.equal(data.records[0].description.length, 240);
     assert.equal(data.truncated, true); checks += 2;
+    assert.ok(data.sourceTables[0].rows[1].cells[2].text.length > 240, 'original description is retained beyond the normalized preview'); checks++;
     console.log(`PASS: ${checks} ABANCA reader assertions (Chromium, local fictional pages only)`);
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

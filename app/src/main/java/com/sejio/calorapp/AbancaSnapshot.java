@@ -16,10 +16,11 @@ final class AbancaSnapshot {
     static final String READER = "abanca-html-v1";
 
     static JSONObject prepare(JSONObject source) throws Exception {
-        if (!READER.equals(source.getString("reader")) || !"captured".equals(source.getString("status"))
+        String reader = source.getString("reader");
+        if (!READER.equals(reader) || !"captured".equals(source.getString("status"))
                 || !source.getBoolean("partial")) throw invalid();
         String page = source.getString("pageType");
-        if (!page.equals("overview") && !page.equals("account") && !page.equals("card")) throw invalid();
+        if (!page.equals("overview") && !page.equals("account") && !page.equals("card") && !page.equals("loan")) throw invalid();
         boolean truncated = source.getBoolean("truncated");
         int omitted = source.getInt("omittedRows");
         if (omitted < 0 || omitted > 100_000) throw invalid();
@@ -43,6 +44,13 @@ final class AbancaSnapshot {
                 row = product + " · " + label + (kind.isEmpty() ? "" : " · " + kind)
                         + "\n" + balanceLabel + ": " + displayMoney(balance)
                         + (limit == null ? "" : " · Límite concedido: " + displayMoney(limit));
+            } else if (page.equals("loan")) {
+                String section = string(raw, "section", 80, false), group = string(raw, "group", 120, true);
+                String label = string(raw, "label", 80, false), value = string(raw, "value", 240, false);
+                if (!section.equals("Datos del préstamo") && !section.equals("Datos generales")
+                        && !section.equals("Pendiente de pago") && !section.equals("Condiciones")) throw invalid();
+                record.put("section", section).put("group", group).put("label", label).put("value", value);
+                row = section + (group.isEmpty() ? "" : " · " + group) + "\n" + label + ": " + value;
             } else {
                 String operationDate = date(raw, "operationDate"), description = string(raw, "description", 240, false);
                 JSONObject amount = money(raw, "amount", false);
@@ -62,6 +70,11 @@ final class AbancaSnapshot {
                             + (payment.isEmpty() ? "" : "\nPago: " + payment);
                 }
             }
+            if (raw.has("sourceTable") || raw.has("sourceRow")) {
+                int table = raw.getInt("sourceTable"), sourceRow = raw.getInt("sourceRow");
+                if (table < 0 || table > 7 || sourceRow < 0 || sourceRow > 100000) throw invalid();
+                record.put("sourceTable", table).put("sourceRow", sourceRow);
+            }
             if (row.length() > 400) { row = row.substring(0, 399) + "…"; truncated = true; }
             payloadBytes += record.toString().getBytes(StandardCharsets.UTF_8).length
                     + new JSONArray().put(row).toString().getBytes(StandardCharsets.UTF_8).length + 4;
@@ -71,7 +84,7 @@ final class AbancaSnapshot {
             rows.put(row);
         }
         // Rebuild instead of persisting arbitrary keys supplied by a page.
-        return new JSONObject().put("status", "captured").put("reader", READER).put("pageType", page)
+        return new JSONObject().put("status", "captured").put("reader", reader).put("pageType", page)
                 .put("partial", true).put("truncated", truncated).put("omittedRows", omitted)
                 .put("records", records).put("rows", rows);
     }
@@ -87,6 +100,7 @@ final class AbancaSnapshot {
             case "overview": return "Resumen de productos";
             case "account": return "Movimientos de cuenta";
             case "card": return "Movimientos de tarjeta";
+            case "loan": return "Detalle del préstamo";
             default: return "Datos guardados";
         }
     }

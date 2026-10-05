@@ -1,5 +1,9 @@
 # Banking local en Pausa
 
+**Actualización 6.5:** [SQLite y sincronización ABANCA](banking-database.md).
+Las consultas nuevas se conservan con procedencia; los archivos antiguos se mantienen
+para recuperación. Este documento describe la fase inicial anterior.
+
 **Actualización 05/10/2026:** Trade Republic incorpora un [cliente nativo](trade-republic-native.md)
 como acceso principal. Este documento describe la implementación previa de navegador,
 que sigue disponible como prueba. El cliente nativo tiene un almacén cifrado separado.

@@ -27,7 +27,7 @@ final class BankSnapshotStore {
         return new AtomicFile(new File(context.getNoBackupFilesDir(), "banking_" + bank.id + ".enc"));
     }
 
-    private static SecretKey key() throws Exception {
+    static synchronized SecretKey key() throws Exception {
         KeyStore store = KeyStore.getInstance("AndroidKeyStore");
         store.load(null);
         if (store.containsAlias(ALIAS)) return (SecretKey) store.getKey(ALIAS, null);

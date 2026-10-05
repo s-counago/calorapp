@@ -27,6 +27,8 @@
             android:name=".TradeRepublicActivity"
             android:exported="false" />
 
+        <activity android:name=".AbancaArchiveActivity" android:exported="false" />
+
         <activity
             android:name=".RenfeAutomationActivity"
             android:exported="false" />

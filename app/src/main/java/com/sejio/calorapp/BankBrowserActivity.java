@@ -36,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 /** Visible, user-operated bank browser. Extraction never drives login or banking actions. */
 public final class BankBrowserActivity extends Activity {
     static final String EXTRA_BANK = "bank";
+    static final String EXTRA_SYNC = "sync_after_login";
     private BankProvider bank;
     private WebView browser;
     private TextView status, origin;
@@ -50,6 +51,11 @@ public final class BankBrowserActivity extends Activity {
     private BankBrowserMode mode;
     private Button modeButton;
     private boolean desktopHints;
+    private AbancaSyncController abancaSync;
+    private String linksScript;
+    private Button syncButton, syncCancel, viewSaved;
+    private LinearLayout syncCover;
+    private TextView syncProgress;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -73,6 +79,7 @@ public final class BankBrowserActivity extends Activity {
         root.addView(status);
         capture = PausaUi.action(this, "Guardar datos de esta página", true, this::capture);
         capture.setEnabled(false);
+        if (bank == BankProvider.ABANCA) capture.setVisibility(View.GONE);
         root.addView(capture, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout actions = new LinearLayout(this);
         actions.addView(PausaUi.quiet(this, "Volver", PausaUi.GREEN, this::finish), new LinearLayout.LayoutParams(0, -2, 1));
@@ -81,6 +88,13 @@ public final class BankBrowserActivity extends Activity {
         }), new LinearLayout.LayoutParams(0, -2, 1));
         actions.addView(PausaUi.quiet(this, "Ayuda", PausaUi.GREEN, this::help), new LinearLayout.LayoutParams(0, -2, 1));
         root.addView(actions);
+        if (bank == BankProvider.ABANCA) {
+            syncButton = PausaUi.action(this, "Sincronizar productos", true, () -> {
+                if (abancaSync == null) return;
+                if (abancaSync.isActive()) abancaSync.cancel(); else abancaSync.request();
+            });
+            syncButton.setEnabled(false); root.addView(syncButton);
+        }
         if (bank == BankProvider.TRADE_REPUBLIC) {
             LinearLayout testActions = new LinearLayout(this);
             modeButton = PausaUi.quiet(this, mode.label, PausaUi.GREEN, this::chooseMode);
@@ -101,6 +115,7 @@ public final class BankBrowserActivity extends Activity {
         }
         try {
             readerScript = readAsset();
+            if (bank == BankProvider.ABANCA) linksScript = readAsset("banking/abanca-links.js");
             createBrowser();
         } catch (Exception error) {
             destroyBrowser();
@@ -142,37 +157,70 @@ public final class BankBrowserActivity extends Activity {
                 reading = false;
                 loadFailed = false;
                 capture.setEnabled(false);
+                if (abancaSync != null) abancaSync.pageStarted(url);
                 origin.setText(bank.allows(url) ? Uri.parse(url).getHost() : "Destino no permitido");
                 if (!bank.allows(url)) { view.stopLoading(); status.setText("Enlace externo bloqueado. Vuelve al inicio del banco."); }
             }
             @Override public void onPageFinished(WebView view, String url) {
-                capture.setEnabled(!reading && !loadFailed && bank.allows(url) && bank.allows(view.getUrl()));
+                capture.setEnabled(!reading && !loadFailed && bank.allows(url) && bank.allows(view.getUrl())
+                        && (abancaSync == null || !abancaSync.isActive()));
                 flushCookies();
+                if (abancaSync != null) abancaSync.pageFinished(url);
                 // Page load is not proof of authentication. The bank owns session expiry.
             }
             @Override public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
                 handler.cancel();
+                if (abancaSync != null) abancaSync.error();
                 loadFailed = true;
                 capture.setEnabled(false);
                 status.setText("No se pudo verificar la conexión segura con el banco.");
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
+                    if (abancaSync != null) abancaSync.error();
                     loadFailed = true;
                     capture.setEnabled(false);
                     status.setText("No se pudo cargar la página. Comprueba la conexión o consulta Ayuda.");
                 }
             }
+            @Override public void onReceivedHttpError(WebView view, WebResourceRequest request, android.webkit.WebResourceResponse response) {
+                if (request.isForMainFrame() && response.getStatusCode() >= 400 && abancaSync != null) abancaSync.error();
+            }
         });
         browser.setDownloadListener((url, agent, disposition, type, size) ->
                 status.setText("La descarga de archivos aún no está integrada. Usa la web del banco en tu navegador para descargar extractos."));
         browserFrame.addView(browser, new FrameLayout.LayoutParams(-1, -1));
+        if (bank == BankProvider.ABANCA) prepareSync();
         final WebView created = browser;
         browserFrame.post(() -> {
             if (browser != created || isDestroyed()) return;
             layoutBrowser();
-            browser.loadUrl(bank.home);
+            if (abancaSync != null && getIntent().getBooleanExtra(EXTRA_SYNC, false)) abancaSync.request();
+            else browser.loadUrl(bank.home);
         });
+    }
+
+    private void prepareSync() {
+        syncCover = new LinearLayout(this); syncCover.setOrientation(LinearLayout.VERTICAL);
+        syncCover.setGravity(android.view.Gravity.CENTER); syncCover.setPadding(dp(24), dp(24), dp(24), dp(24));
+        syncCover.setBackgroundColor(PausaUi.CREAM); syncCover.setClickable(true); syncCover.setVisibility(View.GONE);
+        syncProgress = PausaUi.text(this, "", 17, PausaUi.INK, true); syncCover.addView(syncProgress);
+        syncCancel = PausaUi.quiet(this, "Mostrar web y detener", PausaUi.GREEN, () -> {
+            if (abancaSync != null && abancaSync.isActive()) abancaSync.cancel();
+            else { syncCover.setVisibility(View.GONE); capture.setEnabled(!loadFailed && browser != null && bank.allows(browser.getUrl())); }
+        }); syncCover.addView(syncCancel);
+        viewSaved = PausaUi.action(this, "Ver datos guardados", true, () -> startActivity(new Intent(this, AbancaArchiveActivity.class)));
+        syncCover.addView(viewSaved); browserFrame.addView(syncCover, new FrameLayout.LayoutParams(-1, -1));
+        abancaSync = new AbancaSyncController(this, browser, readerScript, linksScript, (cover, cancellable, message) -> {
+            if (isFinishing() || isDestroyed()) return;
+            status.setText(message); syncProgress.setText(message); syncCover.setVisibility(cover ? View.VISIBLE : View.GONE);
+            boolean active = abancaSync != null && abancaSync.isActive();
+            syncButton.setText(active ? "Detener sincronización" : "Sincronizar productos"); syncButton.setEnabled(cancellable);
+            syncCancel.setEnabled(cancellable); syncCancel.setText(active ? "Mostrar web y detener" : "Mostrar web");
+            viewSaved.setEnabled(!active);
+            capture.setEnabled(!cover && !active && !reading && !loadFailed && browser != null && bank.allows(browser.getUrl()));
+        });
+        syncButton.setEnabled(true);
     }
 
     @SuppressLint("RequiresFeature")
@@ -264,13 +312,14 @@ public final class BankBrowserActivity extends Activity {
     }
 
     private boolean blockNavigation(String url) {
+        if (abancaSync != null) abancaSync.navigating(url);
         if (bank.allows(url)) return false;
         status.setText("Este enlace abre otro destino. Usa Ayuda para acceder con el navegador del sistema si el banco lo necesita.");
         return true;
     }
 
     private void capture() {
-        if (browser == null || reading || !bank.allows(browser.getUrl())) return;
+        if (browser == null || reading || (abancaSync != null && abancaSync.isActive()) || !bank.allows(browser.getUrl())) return;
         reading = true;
         capture.setEnabled(false);
         final String url = browser.getUrl();
@@ -326,8 +375,11 @@ public final class BankBrowserActivity extends Activity {
     }
 
     private String readAsset() throws Exception {
-        try (InputStream input = getAssets().open(bank == BankProvider.ABANCA
-                ? "banking/read-abanca.js" : "banking/read-visible.js");
+        return readAsset(bank == BankProvider.ABANCA ? "banking/read-abanca.js" : "banking/read-visible.js");
+    }
+
+    private String readAsset(String path) throws Exception {
+        try (InputStream input = getAssets().open(path);
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[4096];
             int read;
@@ -359,6 +411,7 @@ public final class BankBrowserActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        if (abancaSync != null) abancaSync.pause();
         flushCookies();
         if (browser != null) browser.onPause();
         super.onPause();
@@ -369,6 +422,7 @@ public final class BankBrowserActivity extends Activity {
     }
 
     private void destroyBrowser() {
+        if (abancaSync != null) { abancaSync.close(); abancaSync = null; }
         if (browser == null) return;
         browser.stopLoading();
         if (browser.getParent() != null) ((ViewGroup) browser.getParent()).removeView(browser);

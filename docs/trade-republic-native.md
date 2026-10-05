@@ -1,5 +1,8 @@
 # Cliente nativo de Trade Republic
 
+**Actualización 6.5:** las consultas financieras también se incorporan a la
+[base SQLite común](banking-database.md). La sesión conserva su almacén cifrado separado.
+
 Implementación Java de consulta desde el teléfono, sin ejecutar ni empaquetar pytr.
 Se entra por **Banca → Trade Republic → Conectar y sincronizar**. Usa el protocolo
 de la web, sin WebView. La prueba anterior de navegador conserva sus propios perfiles;

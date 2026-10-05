@@ -187,7 +187,8 @@ public final class TradeRepublicClient implements AutoCloseable {
             JSONArray positions;
             try { positions = TradePortfolio.normalize(socket.readPortfolio(securitiesAccount)); }
             catch (org.json.JSONException error) { throw TradeException.protocol(); }
-            portfolio = new JSONObject().put("capturedAt", System.currentTimeMillis()).put("positions", positions);
+            portfolio = new JSONObject().put("capturedAt", System.currentTimeMillis())
+                    .put("accountId", ByteString.encodeUtf8(securitiesAccount).sha256().hex()).put("positions", positions);
             if (valuePositions) {
                 instrumentCache = TradeValuation.collect(positions, instrumentCache, new TradeValuation.Source() {
                     int quotes;
@@ -219,6 +220,7 @@ public final class TradeRepublicClient implements AutoCloseable {
         if (state.has("processId")) throw new TradeException("PENDING", "Completa primero la confirmación del acceso.");
         verifySession();
         JSONObject snapshot = new JSONObject().put("capturedAt", System.currentTimeMillis());
+        if (!securitiesAccount.isEmpty()) snapshot.put("accountId", ByteString.encodeUtf8(securitiesAccount).sha256().hex());
         Request request = new Request.Builder().url(api).header("User-Agent", userAgent).build();
         try (TradeSocket socket = new TradeSocket(http, request)) {
             socket.connect();
