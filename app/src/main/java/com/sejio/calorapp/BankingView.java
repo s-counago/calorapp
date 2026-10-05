@@ -50,6 +50,15 @@ final class BankingView extends LinearLayout {
         params.topMargin = dp(16);
         content.addView(card, params);
         card.addView(PausaUi.editorial(context, bank.label, 24));
+        if (bank == BankProvider.TRADE_REPUBLIC) {
+            paragraph(card, "Cliente directo: confirma el acceso en Trade Republic y vuelve para consultar saldo y movimientos.", false);
+            card.addView(PausaUi.action(context, "Conectar y sincronizar", true, () -> context.startActivity(
+                    new Intent(context, TradeRepublicActivity.class))));
+            card.addView(PausaUi.quiet(context, "Prueba anterior en navegador", PausaUi.GREEN, () -> context.startActivity(
+                    new Intent(context, BankBrowserActivity.class).putExtra(BankBrowserActivity.EXTRA_BANK, bank.id))));
+            card.addView(PausaUi.quiet(context, "Olvidar sesiones de la prueba anterior", PausaUi.TERRACOTTA, () -> confirmForget(bank)));
+            return;
+        }
         JSONObject snapshot = null;
         boolean failed = false;
         try { snapshot = BankSnapshotStore.load(context, bank); }

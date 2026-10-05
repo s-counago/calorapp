@@ -187,8 +187,7 @@ public final class BankBrowserActivity extends Activity {
                 .setBrandVersionList(java.util.Collections.singletonList(brand))
                 .setFullVersion(version).setPlatform("Linux").setPlatformVersion("")
                 .setArchitecture("x86").setBitness(64).setModel("").setMobile(false).setWow64(false);
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA_FORM_FACTORS))
-            metadata.setFormFactors(java.util.Collections.singletonList(UserAgentMetadata.FORM_FACTOR_DESKTOP));
+        // Use public WebKit metadata APIs; form-factor overrides are library-internal in 1.15.
         WebSettingsCompat.setUserAgentMetadata(settings, metadata.build());
         desktopHints = true;
     }

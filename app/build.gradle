@@ -10,8 +10,8 @@ android {
         applicationId "com.sejio.calorapp"
         minSdk 23
         targetSdk 35
-        versionCode 17
-        versionName "6.0"
+        versionCode 18
+        versionName "6.1"
         testInstrumentationRunner project.findProperty("uiTestRunner") ?: "com.sejio.calorapp.PlannerSmokeTest"
     }
 
@@ -27,8 +27,9 @@ android {
     buildTypes {
         bankingUa {
             initWith debug
+            debuggable false
             applicationIdSuffix ".bankingua"
-            versionNameSuffix "-banking-ua"
+            versionNameSuffix "-banking-tr"
             matchingFallbacks = ["debug"]
             signingConfig signingConfigs.bankingUa
         }
@@ -37,4 +38,8 @@ android {
 
 dependencies {
     implementation "androidx.webkit:webkit:1.15.0"
+    implementation "com.squareup.okhttp3:okhttp:5.3.2"
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.json:json:20250517"
+    testImplementation "com.squareup.okhttp3:mockwebserver:5.3.2"
 }

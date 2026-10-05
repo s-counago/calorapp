@@ -1,4 +1,4 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <application android:label="Pausa Banking · prueba UA" tools:replace="android:label" />
+    <application android:label="Pausa Banking · TR nativo" tools:replace="android:label" />
 </manifest>

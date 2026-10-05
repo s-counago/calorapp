@@ -1,5 +1,9 @@
 # Banking local en Pausa
 
+**Actualización 05/10/2026:** Trade Republic incorpora un [cliente nativo](trade-republic-native.md)
+como acceso principal. Este documento describe la implementación previa de navegador,
+que sigue disponible como prueba. El cliente nativo tiene un almacén cifrado separado.
+
 ## Decisión y alcance (4 de octubre de 2026)
 
 El usuario elige gestionar sus propias sesiones y consultar datos cuando lo necesite,

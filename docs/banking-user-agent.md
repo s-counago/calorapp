@@ -1,6 +1,9 @@
 # Prueba del acceso web de Trade Republic
 
-La variante `bankingUa` se instala como **Pausa Banking · prueba UA**, con ID
+Desde el 05/10/2026 la misma variante incorpora el [cliente nativo de TR](trade-republic-native.md)
+y se llama **Pausa Banking · TR nativo**. La prueba A/B/C sigue disponible.
+
+La variante `bankingUa` se instalaba como **Pausa Banking · prueba UA**, con ID
 `com.sejio.calorapp.bankingua`. Convive con la app personal y la anterior prueba
 `com.sejio.calorapp.bankingtest`; no hereda sus datos, sesiones ni firma.
 
@@ -41,7 +44,8 @@ perfil anterior de Trade Republic, conservando la captura.
 
 La identificación de PC usa la versión real de Chromium instalada y, cuando
 WebView lo soporta, Client Hints coherentes (`mobile=false`, plataforma Linux,
-arquitectura x86 y formato Desktop). Si no permite configurar Client Hints,
+arquitectura x86). No se utiliza la API interna de WebKit para forzar form factors.
+Si no permite configurar Client Hints,
 Diagnóstico advierte de que la prueba es parcial. El motor sigue siendo Android
 WebView: no se falsifican propiedades JavaScript táctiles ni se omiten errores TLS.
 ABANCA conserva su identificación y perfil originales.
