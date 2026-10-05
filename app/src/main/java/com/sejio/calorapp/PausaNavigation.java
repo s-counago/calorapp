@@ -96,6 +96,7 @@ final class PausaNavigation extends LinearLayout {
         if (!animate || left < 0 || !PausaUi.motion(getContext())) { left = toLeft; right = toRight; invalidate(); return; }
         float fromLeft = left, fromRight = right;
         boolean forward = toLeft > fromLeft;
+        TextView target = tabs[index];
         animator = ValueAnimator.ofFloat(0, 1);
         animator.setDuration(380);
         animator.setInterpolator(PausaUi.EASE);
@@ -103,8 +104,10 @@ final class PausaNavigation extends LinearLayout {
             float t = (Float) a.getAnimatedValue();
             // The leading edge travels first, the trailing edge catches up: a soft stretch.
             float lead = Math.min(1, t * 1.35f), trail = Math.max(0, (t - .15f) / .85f);
-            left = fromLeft + (toLeft - fromLeft) * (forward ? trail : lead);
-            right = fromRight + (toRight - fromRight) * (forward ? lead : trail);
+            // Aim at where the tab is now: the bar may be widening while the pill travels.
+            float endLeft = target.getLeft(), endRight = target.getRight();
+            left = fromLeft + (endLeft - fromLeft) * (forward ? trail : lead);
+            right = fromRight + (endRight - fromRight) * (forward ? lead : trail);
             invalidate();
         });
         animator.start();
@@ -112,8 +115,6 @@ final class PausaNavigation extends LinearLayout {
 
     @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
         super.onLayout(changed, l, t, r, b);
-        // The bar widens when the action button hides; a glide aimed at the old geometry must not land there.
-        if (changed && animator != null && animator.isRunning()) animator.cancel();
         if (selected >= 0 && (animator == null || !animator.isRunning())) {
             left = tabs[selected].getLeft(); right = tabs[selected].getRight();
         }

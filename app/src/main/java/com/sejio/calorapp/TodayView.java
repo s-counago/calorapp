@@ -39,11 +39,12 @@ final class TodayView extends PausaUi.Scroll {
     private final TextView eyebrow, greeting;
     private final Meters.SunGauge gauge;
     private final TextView calorieText, calorieOf, calorieStatus, limitChip;
-    private final TextView proteinText;
+    private final TextView proteinText, proteinGoal;
+    private final Meters.Bar proteinBar;
     private final TextView cigaretteText, cigaretteGoal;
     private final Meters.Dots dots;
-    private final PausaUi.Check ritual;
-    private final TextView ritualText;
+    private final PausaUi.Check ritual, habitRitual;
+    private final TextView ritualText, habitRitualText;
     private final LinearLayout dayList;
     private final TextView tomorrowLine;
     private int shownCalories = -1, shownProtein = -1;
@@ -151,10 +152,11 @@ final class TodayView extends PausaUi.Scroll {
         root.addView(calories, spaced(0, 12));
 
         // Protein strip.
+        LinearLayout proteinCard = column();
+        proteinCard.setBackground(PausaUi.card(activity));
+        proteinCard.setPadding(dp(18), dp(12), dp(12), dp(10));
         LinearLayout protein = new LinearLayout(activity);
         protein.setGravity(Gravity.CENTER_VERTICAL);
-        protein.setBackground(PausaUi.card(activity));
-        protein.setPadding(dp(18), dp(12), dp(12), dp(12));
         LinearLayout proteinLabels = column();
         proteinLabels.setBackground(PausaUi.ripple(activity, android.graphics.Color.TRANSPARENT, 14));
         proteinLabels.setOnClickListener(v -> proteinSheet());
@@ -165,9 +167,16 @@ final class TodayView extends PausaUi.Scroll {
         proteinLabel.setSingleLine(true);
         proteinLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
         proteinLabels.addView(proteinLabel, full());
+        LinearLayout proteinValue = new LinearLayout(activity);
+        proteinValue.setGravity(Gravity.BOTTOM);
         proteinText = PausaUi.editorial(activity, "0 g", 26);
-        proteinText.setPadding(0, dp(4), 0, 0);
-        proteinLabels.addView(proteinText, full());
+        proteinValue.addView(proteinText);
+        proteinGoal = PausaUi.text(activity, "", 14, PausaUi.MUTED, false);
+        proteinGoal.setPadding(dp(4), 0, 0, dp(3));
+        proteinValue.addView(proteinGoal);
+        LinearLayout.LayoutParams pvp = full();
+        pvp.topMargin = dp(4);
+        proteinLabels.addView(proteinValue, pvp);
         protein.addView(proteinLabels, new LinearLayout.LayoutParams(0, -2, 1));
         for (int grams : new int[]{10, 25, 50}) {
             TextView chip = PausaUi.amountChip(activity, "+" + grams, PausaUi.SAGE, PausaUi.SAGE_SOFT,
@@ -176,7 +185,13 @@ final class TodayView extends PausaUi.Scroll {
             p.leftMargin = dp(5);
             protein.addView(chip, p);
         }
-        root.addView(protein, spaced(0, 12));
+        proteinCard.addView(protein, full());
+        proteinBar = new Meters.Bar(activity);
+        LinearLayout.LayoutParams barParams = full();
+        barParams.topMargin = dp(8);
+        barParams.rightMargin = dp(6);
+        proteinCard.addView(proteinBar, barParams);
+        root.addView(proteinCard, spaced(0, 12));
 
         // Cigarettes strip.
         LinearLayout cigarettes = column();
@@ -234,22 +249,22 @@ final class TodayView extends PausaUi.Scroll {
         dayHeader.addView(organize, new LinearLayout.LayoutParams(-2, dp(48)));
         root.addView(dayHeader, spaced(0, 8));
 
-        LinearLayout ritualRow = new LinearLayout(activity);
-        ritualRow.setGravity(Gravity.CENTER_VERTICAL);
-        ritualRow.setPadding(dp(4), dp(4), dp(16), dp(4));
-        ritualRow.setBackground(PausaUi.ripple(activity, PausaUi.SUN_SOFT, 20));
+        LinearLayout rituals = column();
+        rituals.setBackground(PausaUi.surface(activity, PausaUi.SUN_SOFT, 20));
+        rituals.setPadding(dp(4), dp(10), dp(16), dp(4));
+        TextView ritualsLabel = PausaUi.eyebrow(activity, "Ritual diario", 0xFF9A6A12);
+        ritualsLabel.setPadding(dp(14), 0, 0, dp(2));
+        rituals.addView(ritualsLabel, full());
         ritual = new PausaUi.Check(activity, 0xFFC98A1C);
-        ritual.setContentDescription(activity.getString(R.string.notion_priority_review));
-        ritual.setListener(done -> { TaskStore.setNotionReviewDone(activity, done); styleRitual(done); });
-        ritualRow.addView(ritual, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        LinearLayout ritualLabels = column();
-        ritualLabels.addView(PausaUi.eyebrow(activity, "Ritual diario", 0xFF9A6A12), full());
         ritualText = PausaUi.text(activity, activity.getString(R.string.notion_priority_review), 15, PausaUi.INK, false);
-        ritualText.setPadding(0, dp(3), 0, 0);
-        ritualLabels.addView(ritualText, full());
-        ritualRow.addView(ritualLabels, new LinearLayout.LayoutParams(0, -2, 1));
-        ritualRow.setOnClickListener(v -> ritual.performClick());
-        root.addView(ritualRow, spaced(0, 10));
+        rituals.addView(ritualRow(ritual, ritualText, done -> { TaskStore.setNotionReviewDone(activity, done); strike(ritualText, done); }), full());
+        habitRitual = new PausaUi.Check(activity, 0xFFC98A1C);
+        habitRitualText = PausaUi.text(activity, activity.getString(R.string.habit_review), 15, PausaUi.INK, false);
+        View habitRow = ritualRow(habitRitual, habitRitualText, done -> { TaskStore.setHabitReviewDone(activity, done); strike(habitRitualText, done); });
+        android.widget.ImageButton toHabits = PausaUi.iconButton(activity, "chevron", "Abrir hábitos", 0xFF9A6A12, () -> host.open(3));
+        ((LinearLayout) habitRow).addView(toHabits, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        rituals.addView(habitRow, full());
+        root.addView(rituals, spaced(0, 10));
 
         dayList = column();
         root.addView(dayList, spaced(0, 10));
@@ -300,6 +315,9 @@ final class TodayView extends PausaUi.Scroll {
         boolean reviewed = TaskStore.isNotionReviewDone(activity);
         if (ritual.isChecked() != reviewed) ritual.setChecked(reviewed);
         styleRitual(reviewed);
+        boolean habits = TaskStore.isHabitReviewDone(activity);
+        if (habitRitual.isChecked() != habits) habitRitual.setChecked(habits);
+        strike(habitRitualText, habits);
         refreshDay();
     }
 
@@ -318,6 +336,10 @@ final class TodayView extends PausaUi.Scroll {
         int protein = CalorieStore.getProtein(activity);
         PausaUi.countTo(proteinText, shownProtein < 0 ? protein : shownProtein, protein, " g");
         shownProtein = protein;
+        int proteinTarget = CalorieStore.getProteinGoal(activity);
+        proteinGoal.setText("/ " + PausaUi.number(proteinTarget) + " g");
+        proteinBar.setProgress(protein, proteinTarget);
+        proteinText.setTextColor(protein >= proteinTarget ? PausaUi.SAGE : PausaUi.INK);
         int count = CalorieStore.getCigaretteCount(activity), goal = CalorieStore.getCigaretteGoal(activity);
         cigaretteText.setText(String.valueOf(count));
         cigaretteText.setTextColor(count > goal ? PausaUi.TERRACOTTA : PausaUi.INK);
@@ -425,6 +447,20 @@ final class TodayView extends PausaUi.Scroll {
 
     private void styleRitual(boolean done) { strike(ritualText, done); }
 
+    private View ritualRow(PausaUi.Check check, TextView text, PausaUi.Check.Listener listener) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(52));
+        row.setBackground(PausaUi.ripple(activity, android.graphics.Color.TRANSPARENT, 16));
+        check.setContentDescription(text.getText());
+        check.setListener(listener);
+        row.addView(check, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        text.setPadding(0, dp(6), 0, dp(6));
+        row.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
+        row.setOnClickListener(v -> check.performClick());
+        return row;
+    }
+
     // ------------------------------------------------------------ counters
 
     private void addCalories(int amount) { CalorieStore.add(activity, amount); countersChanged(); }
@@ -455,7 +491,7 @@ final class TodayView extends PausaUi.Scroll {
 
     private void proteinSheet() {
         PausaUi.Sheet sheet = new PausaUi.Sheet(activity, "Proteína");
-        sheet.subtitle(CalorieStore.getProtein(activity) + " g registrados hoy");
+        sheet.subtitle(CalorieStore.getProtein(activity) + " de " + CalorieStore.getProteinGoal(activity) + " g hoy");
         amountRow(sheet, "Cantidad en gramos", value -> {
             CalorieStore.addProtein(activity, value);
             countersChanged();
@@ -464,6 +500,7 @@ final class TodayView extends PausaUi.Scroll {
                 CalorieStore.addProtein(activity, -value); countersChanged();
             });
         });
+        sheet.add(settingRow("Objetivo diario", CalorieStore.getProteinGoal(activity) + " g", () -> { sheet.dismiss(); editProteinGoal(); }), 4);
         sheet.footer(PausaUi.quiet(activity, "Poner a cero", PausaUi.TERRACOTTA, () -> {
             sheet.dismiss();
             int previous = CalorieStore.getProtein(activity);
@@ -522,6 +559,13 @@ final class TodayView extends PausaUi.Scroll {
         PausaUi.numberSheet(activity, "Límite de calorías", "Kilocalorías al día. El arco se llena al alcanzarlo.",
                 CalorieStore.getCalorieLimit(activity), 1, "Introduce un número entero mayor que cero", value -> {
                     CalorieStore.setCalorieLimit(activity, value); countersChanged();
+                });
+    }
+
+    void editProteinGoal() {
+        PausaUi.numberSheet(activity, "Objetivo de proteína", "Gramos al día. La barra se llena al alcanzarlo.",
+                CalorieStore.getProteinGoal(activity), 1, "Introduce un número entero mayor que cero", value -> {
+                    CalorieStore.setProteinGoal(activity, value); countersChanged();
                 });
     }
 

@@ -17,6 +17,7 @@ final class TaskStore {
     private static final String KEY_TASKS = "tasks";
     private static final String KEY_NOTION_REVIEW_DONE = "notion_review_done";
     private static final String KEY_NOTION_REVIEW_PERIOD = "notion_review_period";
+    private static final String KEY_HABIT_REVIEW_DONE = "habit_review_done";
 
     private TaskStore() {
     }
@@ -129,6 +130,17 @@ final class TaskStore {
         preferences(context).edit().putBoolean(KEY_NOTION_REVIEW_DONE, done).apply();
     }
 
+    static boolean isHabitReviewDone(Context context) {
+        resetDailyNotionReview(context);
+        return preferences(context).getBoolean(KEY_HABIT_REVIEW_DONE, false);
+    }
+
+    static void setHabitReviewDone(Context context, boolean done) {
+        resetDailyNotionReview(context);
+        preferences(context).edit().putBoolean(KEY_HABIT_REVIEW_DONE, done).apply();
+    }
+
+    /** Both daily rituals share one reset period, so they always start the day together. */
     static void resetDailyNotionReview(Context context) {
         SharedPreferences preferences = preferences(context);
         String currentPeriod = currentResetPeriod();
@@ -136,6 +148,7 @@ final class TaskStore {
             preferences.edit()
                     .putString(KEY_NOTION_REVIEW_PERIOD, currentPeriod)
                     .putBoolean(KEY_NOTION_REVIEW_DONE, false)
+                    .putBoolean(KEY_HABIT_REVIEW_DONE, false)
                     .apply();
         }
     }

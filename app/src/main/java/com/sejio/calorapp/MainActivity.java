@@ -42,6 +42,9 @@ public class MainActivity extends Activity implements TodayView.Host {
     private FrameLayout snackHost;
     private Switch notificationSwitch;
     private String fabIcon = "";
+    private int fabSize, fabMargin;
+    private float fabShown = 1;
+    private android.animation.ValueAnimator fabSlide;
     private int currentSection = -1;
     private boolean keyboardVisible;
 
@@ -134,8 +137,10 @@ public class MainActivity extends Activity implements TodayView.Host {
         fab.setScaleType(ImageView.ScaleType.CENTER);
         fab.setStateListAnimator(android.animation.AnimatorInflater.loadStateListAnimator(this, R.animator.button_press));
         fab.setOnClickListener(v -> { v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); primaryAction(); });
-        LinearLayout.LayoutParams fabParams = new LinearLayout.LayoutParams(dp(compactNavigation ? 48 : 68), dp(compactNavigation ? 48 : 68));
-        fabParams.leftMargin = dp(compactNavigation ? 6 : 10);
+        fabSize = dp(compactNavigation ? 48 : 68);
+        fabMargin = dp(compactNavigation ? 6 : 10);
+        LinearLayout.LayoutParams fabParams = new LinearLayout.LayoutParams(fabSize, fabSize);
+        fabParams.leftMargin = fabMargin;
         navRow.addView(fab, fabParams);
         FrameLayout.LayoutParams navParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         navParams.leftMargin = navigationMargin; navParams.rightMargin = navigationMargin;
@@ -256,7 +261,18 @@ public class MainActivity extends Activity implements TodayView.Host {
     }
 
     private void updateFab(int section, boolean animate) {
-        fab.setVisibility(section == 7 ? View.GONE : View.VISIBLE);
+        boolean returning = fabShown < 1;
+        slideFab(section != 7, animate);
+        if (section == 7) return; // Folding away is the whole animation; the icon stays as it was.
+        // Coming back, the unfolding already moves the button: only rotate, so scales don't fight.
+        if (returning) {
+            String icon = section == 1 ? "ticket" : "plus";
+            if (!icon.equals(fabIcon)) { fabIcon = icon; fab.setImageDrawable(new PausaUi.Symbol(this, icon, PausaUi.SURFACE, 26).stroke(2.2f)); }
+            if (animate && PausaUi.motion(this)) {
+                fab.animate().cancel(); fab.setRotation(-90);
+                fab.animate().rotation(0).setDuration(420).setInterpolator(PausaUi.SPRING).start();
+            }
+        }
         String icon = section == 1 ? "ticket" : "plus";
         String label = section == 1 ? "Revisar y formalizar" : section == 3 ? "Nuevo hábito"
                 : section == 6 ? "Añadir al plan de hoy" : section == 4 ? "Añadir al plan de mañana" : "Nueva tarea";
@@ -276,6 +292,31 @@ public class MainActivity extends Activity implements TodayView.Host {
             fab.setScaleX(.4f); fab.setScaleY(.4f); fab.setRotation(-120);
             fab.animate().scaleX(1).scaleY(1).rotation(0).setDuration(460).setInterpolator(PausaUi.SPRING).start();
         }
+    }
+
+    /** The action button folds away (or back) while the navigation widens into its place. */
+    private void slideFab(boolean show, boolean animate) {
+        float target = show ? 1 : 0;
+        if (fabSlide != null) fabSlide.cancel();
+        if (fabShown == target) { applyFab(target); return; }
+        if (!animate || !PausaUi.motion(this)) { applyFab(target); return; }
+        fabSlide = android.animation.ValueAnimator.ofFloat(fabShown, target);
+        fabSlide.setDuration(420);
+        fabSlide.setInterpolator(PausaUi.EASE);
+        fabSlide.addUpdateListener(a -> applyFab((Float) a.getAnimatedValue()));
+        fabSlide.start();
+    }
+
+    private void applyFab(float t) {
+        fabShown = t;
+        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) fab.getLayoutParams();
+        params.width = Math.round(fabSize * t);
+        params.leftMargin = Math.round(fabMargin * t);
+        fab.setLayoutParams(params);
+        float scale = .55f + .45f * t;
+        fab.setScaleX(scale); fab.setScaleY(scale);
+        fab.setAlpha(Math.min(1, t * 1.4f));
+        fab.setVisibility(t <= .001f ? View.GONE : View.VISIBLE);
     }
 
     private void primaryAction() {
@@ -332,6 +373,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         sheet.add(notificationRow, 8);
         sheet.add(counterView.settingRow("Límite de calorías", PausaUi.number(CalorieStore.getCalorieLimit(this)) + " kcal",
                 () -> { sheet.dismiss(); counterView.editCalorieLimit(); }), 8);
+        sheet.add(counterView.settingRow("Objetivo de proteína", CalorieStore.getProteinGoal(this) + " g",
+                () -> { sheet.dismiss(); counterView.editProteinGoal(); }), 8);
         sheet.add(counterView.settingRow("Objetivo de cigarros", CalorieStore.getCigaretteGoal(this) + " al día",
                 () -> { sheet.dismiss(); counterView.editGoal(); }), 8);
         sheet.add(counterView.settingRow("Gráficas de hábitos", HabitStore.graphWeeks(this) + " semanas",

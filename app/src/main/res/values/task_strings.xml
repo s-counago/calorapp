@@ -2,6 +2,7 @@
     <string name="nav_counter">Contador</string>
     <string name="nav_tasks">Tareas</string>
     <string name="notion_priority_review">Revisar prioridades en Notion</string>
+    <string name="habit_review">Revisar hábitos</string>
     <string name="new_task_hint">Nueva tarea</string>
     <string name="add_task">Añadir</string>
     <string name="delete_task">Eliminar</string>

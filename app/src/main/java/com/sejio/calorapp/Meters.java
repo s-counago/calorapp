@@ -83,6 +83,64 @@ final class Meters {
         }
     }
 
+    /**
+     * Protein as a filling capsule, the horizontal sibling of the calorie arc: sage deepening towards the
+     * goal, with a small sun riding the tip. Reaching the goal closes the capsule and lights the sun.
+     */
+    static final class Bar extends View {
+        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint sun = new Paint(Paint.ANTI_ALIAS_FLAG), edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private float shown = -1;
+        private boolean reached;
+        private ValueAnimator animator;
+
+        Bar(Context c) {
+            super(c);
+            track.setColor(0xFFEDE7DA);
+            sun.setColor(PausaUi.SURFACE);
+            edge.setStyle(Paint.Style.STROKE); edge.setStrokeWidth(PausaUi.dp(c, 2.5f));
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        void setProgress(int value, int goal) {
+            float next = goal <= 0 ? 0 : Math.min(1f, value / (float) goal);
+            reached = goal > 0 && value >= goal;
+            if (animator != null) animator.cancel();
+            if (shown < 0 || !PausaUi.motion(getContext())) { shown = next; invalidate(); return; }
+            animator = ValueAnimator.ofFloat(shown, next);
+            animator.setDuration(720);
+            animator.setInterpolator(PausaUi.EASE);
+            animator.addUpdateListener(a -> { shown = (Float) a.getAnimatedValue(); invalidate(); });
+            animator.start();
+        }
+
+        @Override protected void onMeasure(int w, int h) {
+            setMeasuredDimension(MeasureSpec.getSize(w), PausaUi.dp(getContext(), 22));
+        }
+
+        @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+            super.onSizeChanged(w, h, ow, oh);
+            fill.setShader(new LinearGradient(0, 0, w, 0, new int[]{0xFF8FA883, PausaUi.SAGE, 0xFF3F5A3C}, null, Shader.TileMode.CLAMP));
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float knob = PausaUi.dp(getContext(), 8), height = PausaUi.dp(getContext(), 10);
+            float cy = getHeight() / 2f, left = knob, right = getWidth() - knob, r = height / 2;
+            rect.set(left, cy - r, right, cy + r);
+            canvas.drawRoundRect(rect, r, r, track);
+            float p = Math.max(0, shown), tip = left + (right - left) * p;
+            if (p > 0.004f) {
+                rect.set(left, cy - r, Math.max(left + height, tip), cy + r);
+                canvas.drawRoundRect(rect, r, r, fill);
+            }
+            if (p <= 0.004f) return;
+            edge.setColor(reached ? PausaUi.SUN : PausaUi.SAGE);
+            canvas.drawCircle(Math.max(left + r, tip), cy, knob - edge.getStrokeWidth() / 2, sun);
+            canvas.drawCircle(Math.max(left + r, tip), cy, knob - edge.getStrokeWidth() / 2, edge);
+        }
+    }
+
     /** One dot per cigarette allowed today; extra ones spill over in terracotta. */
     static final class Dots extends View {
         private final Paint filled = new Paint(Paint.ANTI_ALIAS_FLAG), empty = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -120,8 +178,10 @@ final class Meters {
             float size = Math.min(PausaUi.dp(getContext(), 11), (width - gap * (total - 1)) / total);
             if (size < PausaUi.dp(getContext(), 3)) size = PausaUi.dp(getContext(), 3);
             float r = size / 2f;
+            // The strip is centred under its card; when it would overflow it simply starts at the edge.
+            float used = total * size + (total - 1) * gap, start = Math.max(0, (width - used) / 2f);
             for (int i = 0; i < total; i++) {
-                float x = r + i * (size + gap);
+                float x = start + r + i * (size + gap);
                 if (x + r > width) break;
                 boolean last = i == count - 1;
                 float scale = last ? reveal : 1;

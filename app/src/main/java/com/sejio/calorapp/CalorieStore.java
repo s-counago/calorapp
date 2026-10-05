@@ -10,6 +10,7 @@ final class CalorieStore {
     private static final String KEY_CIGARETTE_COUNT = "cigarette_count";
     private static final String KEY_CIGARETTE_GOAL = "cigarette_goal";
     private static final String KEY_PROTEIN_TOTAL = "protein_total";
+    private static final String KEY_PROTEIN_GOAL = "protein_goal";
     private static final String KEY_NOTIFICATION_ENABLED = "notification_enabled";
     private static final int STEP = 100;
     private static final int DEFAULT_CIGARETTE_GOAL = 12;
@@ -71,6 +72,14 @@ final class CalorieStore {
         int total = Math.max(0, getProtein(context) + grams);
         preferences(context).edit().putInt(KEY_PROTEIN_TOTAL, total).apply();
         return total;
+    }
+
+    static int getProteinGoal(Context context) {
+        return preferences(context).getInt(KEY_PROTEIN_GOAL, 120);
+    }
+
+    static void setProteinGoal(Context context, int grams) {
+        preferences(context).edit().putInt(KEY_PROTEIN_GOAL, Math.max(1, grams)).apply();
     }
 
     static void resetProtein(Context context) {
