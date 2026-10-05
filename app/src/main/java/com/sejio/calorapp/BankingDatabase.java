@@ -152,6 +152,39 @@ final class BankingDatabase extends SQLiteOpenHelper {
             capture(run, capture); finish(run, "complete", 0);
         } catch (Exception error) { finish(run, "failed", 0); throw error; }
     }
+    /** Latest interpretation of every active movement with its product, for the budget. Read-only. */
+    synchronized JSONArray movements() throws Exception {
+        SQLiteDatabase db = getReadableDatabase();
+        java.util.Map<String, JSONObject> products = new java.util.HashMap<>();
+        try (Cursor cursor = db.rawQuery("SELECT id,bank,type,payload FROM products", null)) {
+            while (cursor.moveToNext()) {
+                JSONObject product = new JSONObject().put("bank", cursor.getString(1)).put("type", cursor.getString(2));
+                try { product.put("label", decrypt("products", cursor.getString(0), cursor.getBlob(3)).optString("label")); }
+                catch (Exception ignored) { product.put("label", ""); }
+                products.put(cursor.getString(0), product);
+            }
+        }
+        JSONArray result = new JSONArray();
+        try (Cursor cursor = db.rawQuery("SELECT id,product_id,payload FROM entities WHERE type='movement' AND active=1", null)) {
+            while (cursor.moveToNext()) {
+                JSONObject product = products.get(cursor.getString(1));
+                if (product == null) continue;
+                JSONObject data;
+                try { data = decrypt("entities", cursor.getString(0), cursor.getBlob(2)); }
+                catch (Exception unreadable) { continue; }
+                result.put(new JSONObject().put("id", cursor.getString(0)).put("bank", product.getString("bank"))
+                        .put("productType", product.getString("type")).put("productLabel", product.getString("label")).put("data", data));
+            }
+        }
+        return result;
+    }
+
+    synchronized long lastSync() {
+        try (Cursor cursor = getReadableDatabase().rawQuery("SELECT MAX(COALESCE(finished_at, started_at)) FROM sync_runs WHERE status='complete'", null)) {
+            return cursor.moveToFirst() ? cursor.getLong(0) : 0;
+        }
+    }
+
     synchronized JSONArray pages(String run) throws Exception {
         JSONArray result = new JSONArray();
         try (Cursor cursor = getReadableDatabase().rawQuery("SELECT id,payload FROM captures WHERE run_id=? ORDER BY captured_at,rowid", new String[]{run})) {

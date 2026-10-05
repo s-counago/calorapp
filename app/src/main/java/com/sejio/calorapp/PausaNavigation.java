@@ -15,12 +15,12 @@ import android.widget.TextView;
 
 /**
  * Floating bottom navigation. A cream pill of light glides behind the selected destination.
- * Sections: 0 Hoy (diario), 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Banca.
+ * Sections: 0 Hoy (diario), 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero.
  */
 final class PausaNavigation extends LinearLayout {
     interface Listener { void select(int section); }
-    static final String[] LABELS = {"Hoy", "Tareas", "Hábitos", "Viajes", "Banca"};
-    private static final String[] SYMBOLS = {"sunrise", "list", "habit", "train", "bank"};
+    static final String[] LABELS = {"Hoy", "Tareas", "Hábitos", "Viajes", "Dinero"};
+    private static final String[] SYMBOLS = {"sunrise", "list", "habit", "train", "wallet"};
     private final TextView[] tabs = new TextView[5];
     private final Paint indicator = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
@@ -112,6 +112,8 @@ final class PausaNavigation extends LinearLayout {
 
     @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
         super.onLayout(changed, l, t, r, b);
+        // The bar widens when the action button hides; a glide aimed at the old geometry must not land there.
+        if (changed && animator != null && animator.isRunning()) animator.cancel();
         if (selected >= 0 && (animator == null || !animator.isRunning())) {
             left = tabs[selected].getLeft(); right = tabs[selected].getRight();
         }

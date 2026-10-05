@@ -14,7 +14,7 @@ import java.util.List;
 
 /** Run on a disposable emulator. Exercises the Amanecer shell with real touches and captures visual states. */
 public final class PausaUiSmokeTest extends Instrumentation {
-    private static final String[] LABELS = {"Diario", "Viajes", "Lista", "Hábitos", "Mañana", "Semana", "Plan de hoy", "Banca"};
+    private static final String[] LABELS = {"Diario", "Viajes", "Lista", "Hábitos", "Mañana", "Semana", "Plan de hoy", "Dinero"};
     private Activity activity;
     private int checks;
     private File output;
@@ -39,7 +39,7 @@ public final class PausaUiSmokeTest extends Instrumentation {
                 final int expected = i;
                 runOnMainSync(() -> {
                     check(((Integer) field(activity, "currentSection")) == expected, "touch navigates to " + LABELS[expected]);
-                    String parent = expected == 7 ? "Banca" : expected == 1 ? "Viajes" : expected == 3 ? "Hábitos" : expected == 0 ? "Hoy" : "Tareas";
+                    String parent = expected == 7 ? "Dinero" : expected == 1 ? "Viajes" : expected == 3 ? "Hábitos" : expected == 0 ? "Hoy" : "Tareas";
                     check(findDescription(nav, parent).isSelected(), "selected tab " + parent);
                     View[] pages = (View[]) field(activity, "sections");
                     int visible = 0; for (View page : pages) if (page.getVisibility() == View.VISIBLE) visible++;

@@ -16,7 +16,7 @@ import java.util.List;
 
 /**
  * App shell. Content scrolls beneath a floating navigation; a contextual action button sits beside it.
- * Sections: 0 Hoy, 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Banca.
+ * Sections: 0 Hoy, 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero.
  */
 public class MainActivity extends Activity implements TodayView.Host {
     private static final int REQUEST_NOTIFICATIONS = 42;
@@ -30,7 +30,7 @@ public class MainActivity extends Activity implements TodayView.Host {
     private PlannerView plannerView;
     private PlannerView todayPlannerView;
     private WeeklyPlannerView weeklyPlannerView;
-    private BankingView bankingView;
+    private BudgetView budgetView;
     private View[] sections;
     private PausaNavigation navigation;
     private PausaUi.Segmented taskTabs;
@@ -74,7 +74,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (plannerView != null) plannerView.refresh();
         if (todayPlannerView != null) todayPlannerView.refresh();
         if (weeklyPlannerView != null) weeklyPlannerView.refresh();
-        if (currentSection == 7 && bankingView != null) bankingView.refresh();
+        if (currentSection == 7 && budgetView != null) budgetView.refresh();
     }
 
     private View createAppView() {
@@ -105,8 +105,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         plannerView = new PlannerView(this);
         weeklyPlannerView = new WeeklyPlannerView(this);
         todayPlannerView = new PlannerView(this, 0);
-        bankingView = new BankingView(this);
-        sections = new View[]{counterView, ticketPlannerView, taskListView, habitListView, plannerView, weeklyPlannerView, todayPlannerView, bankingView};
+        budgetView = new BudgetView(this);
+        sections = new View[]{counterView, ticketPlannerView, taskListView, habitListView, plannerView, weeklyPlannerView, todayPlannerView, budgetView};
         for (View section : sections) {
             section.setVisibility(View.GONE);
             content.addView(section, new FrameLayout.LayoutParams(-1, -1));
@@ -212,7 +212,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (section == 6) todayPlannerView.refresh();
         if (section == 7) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-            bankingView.refresh();
+            budgetView.refresh();
         } else {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         }
@@ -274,7 +274,7 @@ public class MainActivity extends Activity implements TodayView.Host {
 
     private void primaryAction() {
         switch (currentSection) {
-            case 7: break; // Banking has explicit per-bank actions.
+            case 7: break; // Money has its own actions; bank sync stays explicit.
             case 1: ticketPlannerView.review(); break;
             case 2: taskListView.focusComposer(); break;
             case 3: habitListView.createHabit(); break;

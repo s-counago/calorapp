@@ -846,6 +846,61 @@ final class PausaUi {
                 case "bottle":
                     c.drawRoundRect(8,2,16,6,1,1,p); line(c,8,6,5,10,5,21,19,21,19,10,16,6);
                     line(c,5,12,19,12); break;
+                case "wallet":
+                    c.drawRoundRect(3,7,21,20,3,3,p); line(c,5,7,15,3.5f,17,7);
+                    c.drawRoundRect(15,11.5f,21,15.5f,2,2,p); break;
+                case "cart":
+                    line(c,2,4,5,4,7.5f,15,18,15,20.5f,7,6.2f,7); c.drawCircle(9,19,1.4f,p); c.drawCircle(17,19,1.4f,p); break;
+                case "fork":
+                    line(c,5,3,5,8); line(c,8,3,8,21); line(c,11,3,11,8); c.drawArc(5,4,11,12,0,180,false,p);
+                    line(c,18,21,18,3,15,7,15,13,18,13); break;
+                case "bag":
+                    c.drawRoundRect(4,8,20,21,3,3,p); c.drawArc(8.5f,3,15.5f,11,180,180,false,p); break;
+                case "play":
+                    c.drawRoundRect(3,5,21,19,4,4,p); line(c,10,9,15,12,10,15,10,9); break;
+                case "heart":
+                    Path heart = new Path(); heart.moveTo(12,20); heart.cubicTo(4,14.5f,2,10,4.5f,6.5f);
+                    heart.cubicTo(7,3.5f,10.5f,4.5f,12,7.5f); heart.cubicTo(13.5f,4.5f,17,3.5f,19.5f,6.5f);
+                    heart.cubicTo(22,10,20,14.5f,12,20); heart.close(); c.drawPath(heart,p); break;
+                case "dumbbell":
+                    c.drawRoundRect(4.5f,7,7.5f,17,1.5f,1.5f,p); c.drawRoundRect(16.5f,7,19.5f,17,1.5f,1.5f,p);
+                    line(c,7.5f,12,16.5f,12); line(c,2.5f,10,2.5f,14); line(c,21.5f,10,21.5f,14); break;
+                case "phone":
+                    c.drawRoundRect(7,2.5f,17,21.5f,3,3,p); line(c,11,18,13,18); break;
+                case "card":
+                    c.drawRoundRect(2.5f,5,21.5f,19,3,3,p); line(c,2.5f,10,21.5f,10); line(c,6,15,10,15); break;
+                case "doc":
+                    line(c,6,3,14,3,19,8,19,21,6,21,6,3); line(c,14,3,14,8,19,8);
+                    c.drawCircle(10,12.5f,1.2f,p); c.drawCircle(15,17.5f,1.2f,p); line(c,15,11.5f,10,18.5f); break;
+                case "shield":
+                    Path shield = new Path(); shield.moveTo(12,3); shield.lineTo(20,6); shield.lineTo(20,12);
+                    shield.cubicTo(20,16.5f,16.5f,19.8f,12,21); shield.cubicTo(7.5f,19.8f,4,16.5f,4,12); shield.lineTo(4,6); shield.close();
+                    c.drawPath(shield,p); line(c,9,12,11,14,15,10); break;
+                case "seed":
+                    line(c,12,21,12,11);
+                    Path leafs = new Path(); leafs.moveTo(12,14); leafs.cubicTo(12,9,8.5f,7,4,7); leafs.cubicTo(4,11.5f,7,14,12,14);
+                    leafs.moveTo(12,11); leafs.cubicTo(12,6,15.5f,4,20,4); leafs.cubicTo(20,8.5f,17,11,12,11); c.drawPath(leafs,p); break;
+                case "people":
+                    c.drawCircle(9,8,3.5f,p); c.drawArc(2.5f,14,15.5f,27,180,180,false,p);
+                    c.drawCircle(17,9,2.5f,p); c.drawArc(14,15,22,25,200,140,false,p); break;
+                case "gift":
+                    c.drawRoundRect(4,11,20,21,2,2,p); c.drawRoundRect(3,7.5f,21,11,1.5f,1.5f,p); line(c,12,7.5f,12,21);
+                    Path bow = new Path(); bow.moveTo(12,7.5f); bow.cubicTo(9,2.5f,5,5,8,7.5f);
+                    bow.moveTo(12,7.5f); bow.cubicTo(15,2.5f,19,5,16,7.5f); c.drawPath(bow,p); break;
+                case "cash":
+                    c.drawRoundRect(2,6,22,18,3,3,p); c.drawCircle(12,12,3,p); line(c,5.5f,12,6,12); line(c,18,12,18.5f,12); break;
+                case "spark":
+                    Path star = new Path(); star.moveTo(12,3); star.quadTo(13,11,21,12); star.quadTo(13,13,12,21);
+                    star.quadTo(11,13,3,12); star.quadTo(11,11,12,3); star.close(); c.drawPath(star,p); break;
+                case "note":
+                    c.drawRoundRect(5,3,19,21,3,3,p); line(c,9,8,15,8); line(c,9,12,15,12); line(c,9,16,12,16); break;
+                case "box":
+                    line(c,3,7.5f,12,3,21,7.5f,21,16.5f,12,21,3,16.5f,3,7.5f); line(c,3,7.5f,12,12,21,7.5f); line(c,12,12,12,21); break;
+                case "music":
+                    line(c,9,18,9,5,20,3,20,16); c.drawCircle(6.5f,18,2.5f,p); c.drawCircle(17.5f,16,2.5f,p); break;
+                case "in": line(c,12,4,12,20); line(c,6,14,12,20,18,14); break;
+                case "out": line(c,12,20,12,4); line(c,6,10,12,4,18,10); break;
+                case "transfer": line(c,4,9,20,9); line(c,16,5,20,9,16,13); line(c,20,15,4,15); line(c,8,11,4,15,8,19); break;
                 default: c.drawCircle(12,12,8,p);
             }
             c.restore();
