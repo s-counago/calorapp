@@ -390,6 +390,7 @@ final class BankSyncView extends PausaUi.Scroll implements TradeRepository.Liste
     private void options() {
         Context c = getContext();
         PausaUi.Sheet sheet = new PausaUi.Sheet(c, "Más opciones");
+        sheet.add(option(sheet, "Cargar histórico inicial", "doc", () -> c.startActivity(new Intent(c, BankingImportActivity.class))), 6);
         sheet.add(option(sheet, "Lecturas guardadas de ABANCA", "doc", () -> c.startActivity(new Intent(c, AbancaArchiveActivity.class))), 6);
         sheet.add(option(sheet, "Lecturas guardadas de Trade Republic", "doc", () -> c.startActivity(new Intent(c, AbancaArchiveActivity.class)
                 .putExtra(AbancaArchiveActivity.EXTRA_BANK, BankProvider.TRADE_REPUBLIC.id))), 6);

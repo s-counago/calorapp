@@ -129,13 +129,19 @@ final class Ledger {
             if (occurred.length() < 10) return null;
             int day = localDay(occurred, zone);
             String title = data.optString("description", data.optString("title"));
-            Kind kind = tradeKind(data.optString("eventType"), data.optString("status"), data.optString("subtitle"), cents);
+            String event = data.optString("eventType");
+            JSONObject exported = data.optJSONObject("exportFields");
+            if (event.isEmpty() && exported != null) {
+                event = exported.optString("type");
+                if (exported.optString("category").equals("trading")) event = "trade_" + event;
+            }
+            Kind kind = tradeKind(event, data.optString("status"), data.optString("subtitle"), cents);
             Txn txn = new Txn(id, bank, "trade", "Trade Republic", day, day, cents, title, kind, null);
-            txn.reward = cents > 0 && data.optString("eventType").toLowerCase(Locale.ROOT).contains("saveback");
-            txn.category = kind == Kind.SPEND && data.optString("eventType").toLowerCase(Locale.ROOT).contains("atm") ? "efectivo" : guessCategory(txn.haystack());
+            txn.reward = cents > 0 && event.toLowerCase(Locale.ROOT).contains("saveback");
+            txn.category = kind == Kind.SPEND && event.toLowerCase(Locale.ROOT).contains("atm") ? "efectivo" : guessCategory(txn.haystack());
             return txn;
         }
-        int day = parseIso(data.getString("operationDate"));
+        int day = parseIso(data.isNull("operationDate") ? data.getString("bookingDate") : data.getString("operationDate"));
         String valueDate = data.optString("valueDate");
         int valueDay = valueDate.length() >= 10 && !valueDate.equals("null") ? parseIso(valueDate) : day;
         String description = data.optString("description");

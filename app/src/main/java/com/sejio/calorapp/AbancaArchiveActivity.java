@@ -98,6 +98,18 @@ public final class AbancaArchiveActivity extends Activity {
         if (page.optBoolean("sourceTruncated")) paragraph("La página superó el límite de captura. No está completa.");
         if (page.optInt("omittedRows") > 0) paragraph(page.optInt("omittedRows") + " filas no pudieron normalizarse; consulta la tabla original.");
         content.addView(PausaUi.quiet(this, "Volver a consultas", PausaUi.GREEN, this::loadRuns));
+        if (page.optString("transport").equals("file_import")) {
+            paragraph("Carga inicial de archivo · conserva el texto original y todos sus campos.");
+            JSONArray records = page.optJSONArray("importRecords"), lines = new JSONArray();
+            for (int i = 0; i < records.length(); i++) lines.put(records.optJSONObject(i).toString());
+            showRows(lines, 0);
+            content.addView(PausaUi.action(this, "Ver archivo original", false, () -> {
+                content.removeAllViews();
+                content.addView(PausaUi.quiet(this, "Volver", PausaUi.GREEN, () -> show(page)));
+                JSONArray original = new JSONArray(); for (String line : page.optString("sourceText").split("\r?\n")) original.put(line);
+                showRows(original, 0);
+            }));
+        }
         JSONObject normalized = page.optJSONObject("normalized");
         if (normalized != null) {
             paragraph(AbancaSnapshot.title(normalized));

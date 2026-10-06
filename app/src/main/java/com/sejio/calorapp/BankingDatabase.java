@@ -60,18 +60,19 @@ final class BankingDatabase extends SQLiteOpenHelper {
     synchronized void capture(String run, JSONObject capture) throws Exception {
         SQLiteDatabase db = getWritableDatabase(); String bank = capture.getString("bank"), id = capture.getString("captureId");
         long at = capture.getLong("capturedAt"); JSONObject product = capture.getJSONObject("product");
-        List<BankingRecords.Entity> records = bank.equals("abanca") ? BankingRecords.abanca(capture) : BankingRecords.trade(capture);
+        boolean imported = capture.optString("transport").equals("file_import");
+        List<BankingRecords.Entity> records = imported ? BankingRecords.imported(capture) : bank.equals("abanca") ? BankingRecords.abanca(capture) : BankingRecords.trade(capture);
         db.beginTransaction();
         try {
             try (Cursor cursor = db.rawQuery("SELECT bank FROM sync_runs WHERE id=?", new String[]{run})) {
                 if (!cursor.moveToFirst() || !bank.equals(cursor.getString(0))) throw new IllegalArgumentException("Consulta no válida.");
             }
-            product(db, bank, product, at);
+            if (!imported) product(db, bank, product, at);
             ContentValues page = new ContentValues(); page.put("id", id); page.put("run_id", run); page.put("product_id", product.getString("id"));
             page.put("captured_at", at); page.put("source_path", capture.getString("sourcePath")); page.put("parser_version", capture.getString("parserVersion"));
             page.put("payload", encrypt("captures", id, capture));
             if (db.insertWithOnConflict("captures", null, page, SQLiteDatabase.CONFLICT_IGNORE) == -1) { db.setTransactionSuccessful(); return; }
-            if (bank.equals("trade_republic") && capture.getJSONObject("data").has("positions"))
+            if (!imported && bank.equals("trade_republic") && capture.getJSONObject("data").has("positions"))
                 db.execSQL("UPDATE entities SET active=0 WHERE product_id=? AND type='investment_position' AND observed_at<=?", new Object[]{product.getString("id"), at});
             for (BankingRecords.Entity entity : records) {
                 if (entity.data.has("product")) product(db, bank, entity.data.getJSONObject("product"), at);
@@ -79,7 +80,7 @@ final class BankingDatabase extends SQLiteOpenHelper {
                 value.put("observed_at", at); value.put("latest_capture", id); value.put("payload", encrypt("entities", entity.id, entity.data));
                 value.put("active", entity.data.optBoolean("removed") ? 0 : 1);
                 db.insertWithOnConflict("entities", null, value, SQLiteDatabase.CONFLICT_IGNORE);
-                db.update("entities", value, "id=? AND observed_at<=?", new String[]{entity.id, String.valueOf(at)});
+                if (!imported) db.update("entities", value, "id=? AND observed_at<=?", new String[]{entity.id, String.valueOf(at)});
                 ContentValues observation = new ContentValues(); observation.put("capture_id", id); observation.put("ordinal", entity.index);
                 observation.put("entity_id", entity.id); observation.put("source_table", entity.sourceTable); observation.put("source_row", entity.sourceRow);
                 observation.put("payload", encrypt("observations", id + ":" + entity.index, entity.data));
@@ -115,6 +116,41 @@ final class BankingDatabase extends SQLiteOpenHelper {
                 capture(run, capture); finish(run, "complete", 0);
             } catch (Exception failure) { finish(run, "failed", 0); throw failure; }
         }
+    }
+
+    synchronized JSONArray importProducts(String bank, String type) throws Exception {
+        JSONArray result = new JSONArray();
+        try (Cursor cursor = getReadableDatabase().rawQuery("SELECT id,payload FROM products WHERE bank=? AND type=? ORDER BY updated_at DESC", new String[]{bank, type})) {
+            while (cursor.moveToNext()) {
+                JSONObject product = decrypt("products", cursor.getString(0), cursor.getBlob(1));
+                if (!product.optString("identityBasis").equals("legacy_unknown")) result.put(product.put("bank", bank));
+            }
+        }
+        return result;
+    }
+    /** One transaction for the entire file, including run metadata. No partial imports. */
+    synchronized JSONObject importFile(BankingImport.Parsed parsed, JSONObject chosen, long at) throws Exception {
+        SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
+        try {
+            JSONObject product = null;
+            JSONArray available = importProducts(parsed.bank, parsed.productType);
+            for (int i = 0; i < available.length(); i++) if (available.getJSONObject(i).getString("id").equals(chosen.getString("id"))) product = available.getJSONObject(i);
+            if (product == null) throw new BankingImport.Invalid("El producto ya no está disponible. Sincroniza el banco y vuelve a seleccionarlo.");
+            JSONObject page = parsed.capture(product, at); String id = page.getString("captureId");
+            try (Cursor c = db.rawQuery("SELECT product_id FROM captures WHERE id=?", new String[]{id})) {
+                if (c.moveToFirst()) {
+                    if (!c.getString(0).equals(product.getString("id"))) throw new BankingImport.Invalid("Este archivo ya está asociado a otro producto. No se ha vuelto a importar.");
+                    db.setTransactionSuccessful(); return new JSONObject().put("saved", false).put("newEntities", 0).put("observations", 0);
+                }
+            }
+            long before = entityCount(db);
+            begin(id, parsed.bank, "file_import", at); capture(id, page); finish(id, "complete", 0);
+            JSONObject result = new JSONObject().put("saved", true).put("newEntities", entityCount(db) - before).put("observations", parsed.records.length());
+            db.setTransactionSuccessful(); return result;
+        } finally { db.endTransaction(); }
+    }
+    private long entityCount(SQLiteDatabase db) {
+        try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM entities", null)) { c.moveToFirst(); return c.getLong(0); }
     }
 
     synchronized JSONArray runs(String bank, int offset) throws Exception {

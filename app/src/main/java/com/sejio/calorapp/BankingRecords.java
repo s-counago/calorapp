@@ -38,7 +38,7 @@ final class BankingRecords {
         JSONObject amount = data.getJSONObject("amount");
         // Deliberately excludes changing running balance, posting status and row order.
         return hash(new JSONArray().put("abanca-fingerprint-v1").put(productId)
-                .put(data.getString("operationDate"))
+                .put(data.isNull("operationDate") ? data.getString("bookingDate") : data.getString("operationDate"))
                 .put(new BigDecimal(amount.getString("amount")).stripTrailingZeros().toPlainString())
                 .put(amount.opt("currency")).put(normalizedText(data.getString("description")))
                 .put(normalizedText(data.optString("operationType"))).toString());
@@ -123,6 +123,28 @@ final class BankingRecords {
         }
         return result;
     }
+    static List<Entity> imported(JSONObject capture) throws Exception {
+        List<Entity> result = new ArrayList<>();
+        String bank = capture.getString("bank"), owner = capture.getJSONObject("product").getString("id");
+        JSONArray records = capture.getJSONArray("importRecords");
+        for (int i = 0; i < records.length(); i++) {
+            JSONObject data = new JSONObject(records.getJSONObject(i).toString());
+            String type = data.getString("entityType"), id;
+            if (bank.equals("trade_republic")) {
+                data.put("identityBasis", "bank_id");
+                id = entity(owner, "movement", data.getString("bankId"), data, i).id;
+            } else if (type.equals("loan_term")) {
+                String identity = new JSONArray().put(data.getString("section")).put(data.getString("group")).put(data.getString("label")).toString();
+                id = hash(new JSONArray().put(owner).put(type).put(identity).toString());
+            } else {
+                data.put("identityBasis", "abanca-fingerprint-v1"); id = movementId(owner, data);
+            }
+            data.put("bank", bank).put("productId", owner).put("entityType", type);
+            result.add(new Entity(id, owner, type, data, i, data.getInt("sourceTable"), data.getInt("sourceRow")));
+        }
+        return result;
+    }
+
     private static Entity entity(String owner, String type, String identity, JSONObject data, int index) throws Exception {
         data.put("bank", "trade_republic").put("productId", owner).put("entityType", type);
         return new Entity(hash(new JSONArray().put(owner).put(type).put(identity).toString()), owner, type, data, index, -1, -1);
