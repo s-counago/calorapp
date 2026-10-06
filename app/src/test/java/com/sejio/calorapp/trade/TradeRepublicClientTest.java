@@ -348,9 +348,9 @@ public class TradeRepublicClientTest {
                 try {
                     String[] parts = text.split(" ", 3); JSONObject payload = new JSONObject(parts[2]);
                     String topic = payload.getString("type"), body;
-                    if (topic.equals("compactPortfolioByType")) body = "{\"categories\":[{\"positions\":[{\"isin\":\"TEST\",\"netSize\":\"2.5\"}]}]}";
+                    if (topic.equals("compactPortfolioByType")) body = "{\"categories\":[{\"positions\":[{\"isin\":\"TEST\",\"netSize\":\"2.5\",\"averageBuyIn\":\"10\"}]}]}";
                     else if (topic.equals("instrument")) body = "{\"isin\":\"TEST\",\"typeId\":\"stock\",\"exchangeIds\":[\"LSX\"]}";
-                    else if (topic.equals("ticker") && payload.getString("id").equals("TEST.LSX")) body = "{\"isin\":\"TEST\",\"exchangeId\":\"LSX\",\"currencyId\":\"EUR\",\"last\":{\"price\":\"12.34\"}}";
+                    else if (topic.equals("ticker") && payload.getString("id").equals("TEST.LSX")) body = new JSONObject().put("last", new JSONObject().put("price", "12.34").put("time", System.currentTimeMillis())).put("pre", new JSONObject().put("price", "12").put("time", System.currentTimeMillis() - 86400000L)).toString();
                     else { ws.close(1008, "unexpected"); return; }
                     ws.send(parts[1] + " A " + body);
                 } catch (Exception e) { ws.close(1011, "fixture"); }
@@ -359,6 +359,9 @@ public class TradeRepublicClientTest {
         client.syncValuation();
         JSONObject portfolio = client.view().getJSONObject("portfolio");
         assertEquals("30.850", portfolio.getJSONObject("totals").getJSONObject("byCurrency").getString("EUR"));
+        JSONObject pnl = portfolio.getJSONArray("positions").getJSONObject(0).getJSONObject("pnl");
+        assertEquals("5.850", pnl.getJSONObject("total").getString("amount"));
+        assertEquals("0.850", pnl.getJSONObject("daily").getString("amount"));
         assertTrue(portfolio.getJSONObject("totals").getBoolean("complete"));
         assertEquals(3, server.getRequestCount());
         assertTrue("Every subscription must be closed", unsubscribed.await(2, TimeUnit.SECONDS));

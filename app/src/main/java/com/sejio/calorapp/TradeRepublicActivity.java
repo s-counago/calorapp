@@ -157,6 +157,17 @@ public final class TradeRepublicActivity extends Activity implements TradeReposi
                         + "\nMercado: " + quote.optString("exchange") + " · fecha del precio: " + quoteDate
                         + "\nRecibido: " + DateFormat.getDateTimeInstance().format(new Date(quote.optLong("receivedAt")))
                         + (row.has("estimatedValue") ? "\nValor estimado: " + money(row.optString("estimatedValue")) + " " + denomination : ""), true));
+                JSONObject pnl = row.optJSONObject("pnl");
+                if (pnl != null) {
+                    for (String period : new String[]{"total", "daily"}) {
+                        JSONObject metric = pnl.optJSONObject(period);
+                        String title = period.equals("total") ? "PnL total (posiciones abiertas)" : "PnL diario estimado";
+                        if (metric == null) { portfolioHistory.addView(label(title + ": no disponible", false)); continue; }
+                        String percentage = metric.isNull("percent") ? "—" : new java.math.BigDecimal(metric.optString("percent")).setScale(2, java.math.RoundingMode.HALF_EVEN).toPlainString() + " %";
+                        portfolioHistory.addView(label(title + ": " + money(metric.optString("amount")) + " " + metric.optString("currency") + " · " + percentage
+                                + (period.equals("daily") ? " · sesión " + metric.optString("sessionDate") + " · participaciones actuales" : ""), true));
+                    }
+                }
             } else if (totals != null) {
                 String reason = row.optString("valuationStatus");
                 portfolioHistory.addView(label(reason.equals("LIMIT") ? "Sin valorar: límite de esta consulta."

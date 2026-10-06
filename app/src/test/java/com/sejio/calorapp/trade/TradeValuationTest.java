@@ -42,9 +42,12 @@ public class TradeValuationTest {
         assertEquals(now - 86400000, rows.getJSONObject(0).getJSONObject("quote").getLong("quotedAt"));
     }
 
-    @Test public void missingQuoteCurrencyIsNotReplacedWithFundOrPositionCurrency() throws Exception {
+    @Test public void unknownVenueDoesNotBorrowFundOrPositionCurrency() throws Exception {
         JSONArray rows = new JSONArray().put(row("TEST", "1").put("currency", "GBP"));
-        Source source = new Source(); source.currency = null;
+        Source source = new Source() {
+            @Override public Object instrument(String id) throws Exception { instruments++; return TradeValuationTest.this.instrument(id).put("exchangeIds", new JSONArray().put("UNKNOWN")); }
+            @Override public Object ticker(String id, String exchange) throws Exception { quotes++; return TradeValuationTest.this.ticker(id, null, "123.45").put("exchangeId", "UNKNOWN"); }
+        };
         TradeValuation.collect(rows, null, source, now);
         JSONObject result = rows.getJSONObject(0);
         assertEquals("UNKNOWN_CURRENCY", result.getString("valuationStatus"));
@@ -52,6 +55,25 @@ public class TradeValuationTest {
         assertEquals("", result.getJSONObject("quote").getString("currency"));
         assertFalse(TradeValuation.totals(rows).getBoolean("complete"));
         assertEquals(0, TradeValuation.totals(rows).getJSONObject("byCurrency").length());
+    }
+
+    @Test public void lsxUnitQuotesUseExplicitVenueConventionWithoutFundCurrency() throws Exception {
+        Source source = new Source(); source.currency = null;
+        JSONArray rows = new JSONArray().put(row("TEST", "2").put("averageBuyIn", "100"));
+        TradeValuation.collect(rows, null, source, now);
+        JSONObject result = rows.getJSONObject(0);
+        assertEquals("EUR", result.getJSONObject("quote").getString("currency"));
+        assertEquals("lsx_eur_unit_quote_convention", result.getJSONObject("quote").getString("currencyBasis"));
+        assertEquals("46.90", result.getJSONObject("pnl").getJSONObject("total").getString("amount"));
+        assertTrue(TradeValuation.totals(rows).getBoolean("complete"));
+    }
+    @Test public void dailyReferenceKeepsItsOwnPriceTimeAndCurrencyChecks() throws Exception {
+        JSONObject raw = ticker("TEST", "EUR", "110").put("pre", new JSONObject().put("price", "100").put("time", now - 2 * 86400000L));
+        JSONObject result = TradeValuation.quote("TEST", "LSX", raw, now);
+        assertEquals("100", result.getString("previousClose"));
+        assertEquals(now - 2 * 86400000L, result.getLong("previousCloseAt"));
+        raw.getJSONObject("pre").put("currency", "USD");
+        try { TradeValuation.quote("TEST", "LSX", raw, now); fail(); } catch (TradeException expected) { assertEquals("PROTOCOL", expected.code); }
     }
 
     @Test public void freshMetadataIsReusedButQuoteIsRequestedAgain() throws Exception {

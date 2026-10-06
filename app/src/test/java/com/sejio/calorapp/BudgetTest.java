@@ -85,6 +85,15 @@ public final class BudgetTest {
         assertEquals(29, Ledger.monthLength(2028, 2));
     }
 
+    @Test public void importedBookingDatesAndTradingRowsSurviveBankHubMerge() throws Exception {
+        JSONObject account = new JSONObject().put("operationDate", JSONObject.NULL).put("bookingDate", "2026-10-05")
+                .put("description", "Tienda ficticia").put("amount", money("-10"));
+        assertEquals(day("2026-10-05"), Ledger.parse(row("abanca", "account", account), MADRID).day);
+        JSONObject trade = new JSONObject().put("occurredAt", "2026-10-05T10:00:00Z").put("description", "ETF ficticio").put("amount", money("-10"))
+                .put("exportFields", new JSONObject().put("category", "trading").put("type", "buy"));
+        assertEquals(Ledger.Kind.INVEST, Ledger.parse(row("trade_republic", "investment_account", trade), MADRID).kind);
+    }
+
     @Test public void tradeInstantsBecomeLocalDays() {
         assertEquals(day("2026-06-02"), Ledger.localDay("2026-06-01T23:30:00.123456Z", MADRID));
         assertEquals(day("2026-06-01"), Ledger.localDay("2026-06-01T21:30:00Z", MADRID));

@@ -112,7 +112,7 @@ final class BankingDatabase extends SQLiteOpenHelper {
                         .put("type", "investment_account").put("label", "Trade Republic").put("identityBasis", owner.equals("legacy-unidentified") ? "legacy_unknown" : "bank_account_hash");
                 JSONObject capture = new JSONObject().put("schema", 1).put("captureId", run).put("bank", "trade_republic")
                         .put("capturedAt", at).put("product", product).put("transport", "trade_native")
-                        .put("sourcePath", topic).put("parserVersion", "trade-client-v1").put("data", new JSONObject(data.toString()));
+                        .put("sourcePath", topic).put("parserVersion", "trade-client-v2-pnl").put("data", new JSONObject(data.toString()));
                 capture(run, capture); finish(run, "complete", 0);
             } catch (Exception failure) { finish(run, "failed", 0); throw failure; }
         }

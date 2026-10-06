@@ -13,7 +13,7 @@ import java.math.BigDecimal;
 public final class PortfolioTest {
     private static JSONObject position(String id, String name, String quantity, String averageBuyIn, String price) throws Exception {
         JSONObject row = new JSONObject().put("instrumentId", id).put("name", name).put("quantity", quantity)
-                .put("averageBuyIn", averageBuyIn).put("currency", "");
+                .put("averageBuyIn", averageBuyIn).put("currency", "EUR");
         if (price != null) row.put("valuationStatus", "VALUED").put("quote", new JSONObject().put("price", price).put("currency", "EUR"));
         else row.put("valuationStatus", "LIMIT");
         return row;
@@ -46,7 +46,8 @@ public final class PortfolioTest {
         assertEquals(104_000, sp.value); // 2 × 520 €, priced at the 2 000 valuation.
         assertEquals(101_000, sp.cost);
         assertEquals(3_000, sp.gain());
-        assertEquals(3_000L, sp.pricedAt);
+        assertEquals(0L, sp.pricedAt); // Never label receipt time as market time.
+        assertEquals(3_000L, sp.receivedAt);
         assertEquals(104_000 + 9_200, view.value);
         assertEquals(2, view.holdingHistory.get("IE00B5BMR087").size());
         assertEquals("+3 %", Portfolio.percent(sp.gainRatio()));
@@ -59,6 +60,52 @@ public final class PortfolioTest {
         assertFalse(view.holdings.get(0).valued());
         assertEquals(0, view.value);
         assertTrue(view.history.isEmpty());
+    }
+
+    private JSONObject daily(String id, String quantity, String cost, String price, String previous, String day) throws Exception {
+        JSONObject p = position(id, id, quantity, cost, price);
+        long at = java.time.Instant.parse(day + "T10:00:00Z").toEpochMilli();
+        p.getJSONObject("quote").put("exchange", "LSX").put("quotedAt", at).put("receivedAt", at + 1000)
+                .put("previousCloseAt", at - 86400000L).put("previousClose", previous);
+        return p;
+    }
+    @Test public void aggregateDailyReturnIsWeightedByReferenceValueNotAveragePercent() throws Exception {
+        Portfolio.View v = Portfolio.from(new JSONArray().put(reading(1, true,
+                daily("A", "1", "80", "110", "100", "2026-10-05"),
+                daily("B", "9", "100", "90", "100", "2026-10-05"))));
+        assertEquals(-8000, v.dailyGain()); assertEquals(-0.08, v.dailyRatio(), 1e-9);
+        assertEquals(-6000, v.gain()); assertEquals(2, v.dailyValued); assertEquals(2, v.gainValued);
+    }
+    @Test public void missingCostsHaveNoPnlAndDoNotDrawAnInventedCost() throws Exception {
+        JSONObject p = daily("A", "1", "80", "110", "100", "2026-10-05"); p.remove("averageBuyIn");
+        Portfolio.View v = Portfolio.from(new JSONArray().put(reading(1, true, p)));
+        assertEquals(11000, v.value); assertEquals(0, v.gainValued); assertTrue(Double.isNaN(v.gainRatio()));
+        assertEquals(-1, v.history.get(0).cost); assertFalse(v.holdings.get(0).gainKnown()); assertEquals(1, v.dailyValued);
+    }
+    @Test public void differentQuoteSessionsAreNotCombinedAsTodaysReturn() throws Exception {
+        Portfolio.View v = Portfolio.from(new JSONArray().put(reading(1, true,
+                daily("A", "1", "80", "110", "100", "2026-10-05"),
+                daily("B", "9", "100", "90", "100", "2026-10-02"))));
+        assertEquals("2026-10-05", v.dailySession); assertEquals(1, v.dailyValued); assertEquals(1000, v.dailyGain());
+        assertEquals("2026-10-02", v.holdings.get(0).dailySession);
+    }
+    @Test public void cachedQuoteKeepsMarketTimeAndReferenceWhenPositionsRefresh() throws Exception {
+        JSONObject old = daily("A", "1", "80", "110", "100", "2026-10-05");
+        Portfolio.View v = Portfolio.from(new JSONArray().put(reading(1, true, old)).put(reading(2, false, position("A", "A", "2", "85", null))));
+        assertEquals(2000, v.dailyGain()); assertEquals(5000, v.gain());
+        assertEquals(old.getJSONObject("quote").getLong("quotedAt"), v.holdings.get(0).pricedAt);
+    }
+    @Test public void partialValuationIsNotDrawnAsAWholePortfolioHistoryPoint() throws Exception {
+        Portfolio.View v = Portfolio.from(new JSONArray().put(reading(1, true,
+                position("A", "A", "1", "80", "110"), position("B", "B", "1", "100", null))));
+        assertEquals(1, v.valued); assertEquals(1, v.gainValued); assertTrue(v.history.isEmpty());
+        assertEquals(1, v.holdingHistory.get("A").size());
+    }
+
+    @Test public void switchingAccountsCannotReuseAnotherAccountsQuotes() throws Exception {
+        Portfolio.View v = Portfolio.from(new JSONArray().put(reading(1, true, position("A", "A", "1", "80", "110")).put("accountId", "first"))
+                .put(reading(2, false, position("A", "A", "2", "85", null)).put("accountId", "second")));
+        assertEquals(0, v.valued); assertTrue(v.history.isEmpty());
     }
 
     @Test public void numbersReadInSpanish() {

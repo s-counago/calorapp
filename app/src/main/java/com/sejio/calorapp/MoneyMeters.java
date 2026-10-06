@@ -437,14 +437,17 @@ final class MoneyMeters {
             Context c = getContext();
             float top = PausaUi.dp(c, 12), bottom = getHeight() - PausaUi.dp(c, 10);
             long min = Long.MAX_VALUE, max = Long.MIN_VALUE;
-            for (int i = 0; i < n; i++) { min = Math.min(min, Math.min(values[i], costs[i])); max = Math.max(max, Math.max(values[i], costs[i])); }
+            for (int i = 0; i < n; i++) { min = Math.min(min, values[i]); max = Math.max(max, values[i]);
+                if (costs[i] >= 0) { min = Math.min(min, costs[i]); max = Math.max(max, costs[i]); } }
             long span = Math.max(1, max - min);
-            min -= span / 6; max += span / 6; span = max - min;
-            line.reset(); fill.reset(); costLine.reset();
+            min -= span / 6; max += span / 6; span = Math.max(1, max - min);
+            line.reset(); fill.reset(); costLine.reset(); boolean priorCost = false;
             for (int i = 0; i < n; i++) {
                 float px = x(i), vy = bottom - (bottom - top) * (values[i] - min) / span, cy = bottom - (bottom - top) * (costs[i] - min) / span;
-                if (i == 0) { line.moveTo(px, vy); fill.moveTo(px, bottom); fill.lineTo(px, vy); costLine.moveTo(px, cy); }
-                else { line.lineTo(px, vy); fill.lineTo(px, vy); costLine.lineTo(px, cy); }
+                if (i == 0) { line.moveTo(px, vy); fill.moveTo(px, bottom); fill.lineTo(px, vy); }
+                else { line.lineTo(px, vy); fill.lineTo(px, vy); }
+                if (costs[i] >= 0) { if (priorCost) costLine.lineTo(px, cy); else costLine.moveTo(px, cy); }
+                priorCost = costs[i] >= 0;
             }
             fill.lineTo(x(n - 1), bottom); fill.close();
             canvas.save();

@@ -1,3 +1,7 @@
+# Actualización 6.7
+
+La cotización y el PnL actuales se describen en [trade-prices-pnl.md](trade-prices-pnl.md).
+
 # Cliente nativo de Trade Republic
 
 **Actualización 6.5:** las consultas financieras también se incorporan a la
@@ -71,11 +75,12 @@ No hay backend, Python, automatización de navegador ni puente JavaScript.
   precio distinto de 1 se excluye. No se detectan bonos por su nombre ni se adivinan
   unidades. Se utiliza `last.price`, sin sustituirlo por bid/ask ante ausencia.
 - `cantidad × precio` usa `BigDecimal`; se guarda sin redondear y se muestran dos
-  decimales para los valores. No se calcula ganancia ni se mezclan monedas.
-- La moneda procede exclusivamente de la cotización, si está informada. La moneda
-  del fondo, el efectivo o el precio medio no acreditan la moneda de negociación.
-  Si falta, se muestra el valor numérico con «moneda no enviada por TR» y se excluye
-  de los subtotales por moneda. Una cobertura incompleta se etiqueta como parcial.
+  decimales para los valores. Desde 6.7 se calculan PnL total y diario estimado: véase
+  [trade-prices-pnl.md](trade-prices-pnl.md) para fórmulas, cobertura y limitaciones.
+- La moneda explícita del ticker tiene prioridad. Desde 6.7, acciones/ETF unitarios
+  en LSX sin moneda usan la convención EUR, con su inferencia registrada. Otros mercados
+  sin moneda se excluyen del subtotal. No se usa la divisa del fondo ni se aplica FX.
+  La cobertura incompleta se indica como parcial.
 - Se distingue fecha del último precio (`last.time`) de fecha de recepción. Si falta
   la fecha de precio, se indica; no se sustituye por la hora de descarga. Un precio de
   ayer puede mostrarse como tal, sin prometer tiempo real ni precio ejecutable.

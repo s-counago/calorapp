@@ -39,19 +39,25 @@ final class TradeValuation {
                 else if (System.nanoTime() >= deadline) info.put("valuationStatus", "LIMIT");
                 else {
                     Object raw = source.ticker(id, metadata.getString("exchange"));
-                    info.put("quote", quote(id, metadata.getString("exchange"), raw, System.currentTimeMillis()));
+                    JSONObject parsed = quote(id, metadata.getString("exchange"), raw, System.currentTimeMillis());
+                    if (parsed.optString("currency").isEmpty() && metadata.getString("exchange").equals("LSX"))
+                        parsed.put("currency", "EUR").put("currencyBasis", "lsx_eur_unit_quote_convention");
+                    info.put("quote", parsed);
                 }
                 fetched.put(id, info);
             }
             row.put("name", info.optString("name", id));
             JSONObject quote = info.optJSONObject("quote");
             if (quote == null) { row.put("valuationStatus", info.optString("valuationStatus", "UNAVAILABLE")); continue; }
+            if (!quote.optString("previousCloseCurrency").isEmpty() && !quote.optString("currency").isEmpty()
+                    && !quote.getString("previousCloseCurrency").equals(quote.getString("currency"))) throw TradeException.protocol();
             row.put("quote", new JSONObject(quote.toString()));
             if (!quote.has("price")) { row.put("valuationStatus", "NO_PRICE"); continue; }
             BigDecimal quantity = new BigDecimal(TradeRepublicClient.decimal(row.get("quantity")));
             if (quantity.signum() < 0) { row.put("valuationStatus", "UNSUPPORTED_QUANTITY"); continue; }
             row.put("estimatedValue", quantity.multiply(new BigDecimal(quote.getString("price"))).toPlainString());
             row.put("valuationStatus", quote.optString("currency").isEmpty() ? "UNKNOWN_CURRENCY" : "VALUED");
+            row.put("pnl", TradePnl.calculate(row));
         }
         return cache;
     }
@@ -95,7 +101,21 @@ final class TradeValuation {
         if (currency.isEmpty()) currency = outerCurrency;
         long timestamp = TradeRepublicClient.deadline(last.opt("time"));
         if (timestamp < 946684800000L || timestamp > receivedAt + TimeUnit.MINUTES.toMillis(5)) timestamp = 0;
-        return result.put("price", price).put("currency", currency).put("quotedAt", timestamp);
+        result.put("price", price).put("currency", currency).put("quotedAt", timestamp)
+                .put("currencyBasis", currency.isEmpty() ? "unknown" : "ticker")
+                .put("source", "trade_republic_ticker").put("quality", string(data, "qualityId", 80));
+        // Keep the reference that arrived with this exact quote, never yesterday's app snapshot.
+        JSONObject pre = data.optJSONObject("pre");
+        if (pre != null && pre.has("price") && !pre.isNull("price")) {
+            String previous = TradeRepublicClient.decimal(pre.get("price"));
+            String preCurrency = currency(pre);
+            if (!preCurrency.isEmpty() && !currency.isEmpty() && !preCurrency.equals(currency)) throw TradeException.protocol();
+            long previousAt = TradeRepublicClient.deadline(pre.opt("time"));
+            if (new BigDecimal(previous).signum() > 0) result.put("previousClose", previous)
+                    .put("previousCloseCurrency", preCurrency)
+                    .put("previousCloseAt", previousAt >= 946684800000L && previousAt <= receivedAt + TimeUnit.MINUTES.toMillis(5) ? previousAt : 0);
+        }
+        return result;
     }
 
     private static String currency(JSONObject data) throws Exception {

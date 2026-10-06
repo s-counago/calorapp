@@ -80,7 +80,7 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         if (state == null || !state.optBoolean("connected")) { host.openBanks(); return; }
         if (busy) return;
         requested = true;
-        trade.syncAll();
+        trade.execute(client -> client.syncValuation());
     }
 
     // ------------------------------------------------------------ page
@@ -119,7 +119,7 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         contributions();
         holdings();
         TextView note = PausaUi.text(c, "Valores estimados con el último precio recibido en cada valoración. Pueden ir con retraso "
-                + "y no son un precio de venta garantizado. Solo se suman precios en euros.", 12, PausaUi.MUTED, false);
+                + "y no son un precio de venta garantizado. Solo se suman precios en euros. El PnL total es de posiciones abiertas; el diario compara sus participaciones actuales con la referencia de la sesión anterior. No incluye ventas realizadas, dividendos ni ajustes por compras del día.", 12, PausaUi.MUTED, false);
         note.setGravity(Gravity.CENTER);
         note.setLineSpacing(0, 1.2f);
         root.addView(note, spaced(16, 8));
@@ -133,14 +133,18 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         hero.setBackground(PausaUi.surface(c, PausaUi.NIGHT, 28));
         hero.setPadding(dp(22), dp(20), dp(22), dp(18));
         hero.addView(PausaUi.eyebrow(c, "Valor estimado", PausaUi.ON_NIGHT_MUTED), full());
-        TextView value = PausaUi.editorial(c, Budget.money(view.value, false), 48);
+        TextView value = PausaUi.editorial(c, (view.valued > 0 ? Budget.money(view.value, true) : "Sin precio"), view.valued > 0 ? 48 : 30);
         value.setTextColor(PausaUi.ON_NIGHT);
         value.setPadding(0, dp(8), 0, dp(4));
         hero.addView(value, full());
         boolean up = view.gain() >= 0;
-        TextView gain = PausaUi.text(c, (up ? "+" : "") + Budget.money(view.gain(), false) + " · " + Portfolio.percent(view.gainRatio())
-                + " sobre " + Budget.money(view.cost, false) + " invertidos", 14, up ? MoneyMeters.PAID_TONE : MoneyMeters.OVER_TONE, true);
-        hero.addView(gain, full());
+        String totalPnl = view.gainValued > 0 ? "PnL total · " + change(view.gain(), view.gainRatio()) : "PnL total · no disponible";
+        hero.addView(PausaUi.text(c, totalPnl, 14, view.gainValued == 0 ? PausaUi.ON_NIGHT_MUTED : up ? MoneyMeters.PAID_TONE : MoneyMeters.OVER_TONE, true), full());
+        String daily = view.dailyValued > 0 ? "Diario · " + view.dailySession + " · " + change(view.dailyGain(), view.dailyRatio()) : "Diario · falta precio de referencia";
+        hero.addView(PausaUi.text(c, daily, 14, view.dailyValued == 0 ? PausaUi.ON_NIGHT_MUTED : view.dailyGain() >= 0 ? MoneyMeters.PAID_TONE : MoneyMeters.OVER_TONE, true), spaced(6, 0));
+        if (view.gainValued < view.holdings.size() || view.dailyValued < view.holdings.size())
+            hero.addView(PausaUi.text(c, "Cobertura PnL: total " + view.gainValued + "/" + view.holdings.size()
+                    + " · diario " + view.dailyValued + "/" + view.holdings.size() + ". Los subtotales excluyen datos ausentes.", 12, PausaUi.ON_NIGHT_MUTED, false), spaced(6, 0));
         if (view.valued < view.holdings.size())
             hero.addView(PausaUi.text(c, (view.holdings.size() - view.valued) + " posiciones sin precio en euros no se suman", 12, PausaUi.ON_NIGHT_MUTED, false), spaced(4, 0));
 
@@ -155,8 +159,8 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
             hero.addView(caption, full());
             chart.setListener(i -> caption.setText(describe(view.history.get(i))));
             chart.setContentDescription("Evolución del valor de la cartera en " + n + " valoraciones");
-            TextView legend = PausaUi.text(c, n == 1 ? "Cada valoración añade un punto al histórico."
-                    : "Línea: valor · Discontinua: lo invertido · " + n + " valoraciones", 12, PausaUi.ON_NIGHT_MUTED, false);
+            TextView legend = PausaUi.text(c, n == 1 ? "Cada valoración completa añade un punto al histórico."
+                    : "Línea: valor · Discontinua: coste conocido · " + n + " valoraciones", 12, PausaUi.ON_NIGHT_MUTED, false);
             hero.addView(legend, spaced(4, 0));
         }
         return hero;
@@ -164,7 +168,7 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
 
     private String describe(Portfolio.Point point) {
         long gain = point.value - point.cost;
-        return date(point.at) + " · " + Budget.money(point.value, false) + " · " + (gain >= 0 ? "+" : "") + Budget.money(gain, false) + " sobre lo invertido";
+        return date(point.at) + " · " + Budget.money(point.value, false) + (point.cost < 0 ? " · coste incompleto" : " · " + (gain >= 0 ? "+" : "") + Budget.money(gain, false) + " sobre el coste");
     }
 
     private View updater() {
@@ -262,7 +266,7 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         row.setPadding(dp(8), dp(8), dp(10), dp(8));
         row.setBackground(PausaUi.ripple(c, android.graphics.Color.TRANSPARENT, 16));
         boolean up = holding.gain() >= 0;
-        int tone = !holding.valued() ? PausaUi.MUTED : up ? PausaUi.SAGE : PausaUi.TERRACOTTA;
+        int tone = !holding.gainKnown() ? PausaUi.MUTED : up ? PausaUi.SAGE : PausaUi.TERRACOTTA;
         TextView badge = PausaUi.text(c, initials(holding.name), 13, tone, true);
         badge.setGravity(Gravity.CENTER);
         badge.setBackground(PausaUi.surface(c, (tone & 0x00FFFFFF) | 0x1F000000, 19));
@@ -272,7 +276,7 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         TextView name = PausaUi.text(c, holding.name, 15, PausaUi.INK, false);
         name.setSingleLine(true); name.setEllipsize(android.text.TextUtils.TruncateAt.END);
         middle.addView(name, full());
-        String meta = Portfolio.quantity(holding.quantity) + " part." + (holding.averageBuyIn != null ? " · medio " + Portfolio.price(holding.averageBuyIn) : "");
+        String meta = Portfolio.quantity(holding.quantity) + " part." + (holding.averageBuyIn != null && holding.cost >= 0 ? " · medio " + Portfolio.price(holding.averageBuyIn) : "");
         TextView details = PausaUi.text(c, meta, 12, PausaUi.MUTED, false);
         details.setPadding(0, dp(3), 0, 0);
         middle.addView(details, full());
@@ -285,25 +289,27 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         LinearLayout right = column();
         right.setGravity(Gravity.END);
         right.addView(PausaUi.text(c, holding.valued() ? Budget.money(holding.value) : "Sin precio", 15, PausaUi.INK, true));
-        if (holding.valued() && holding.cost >= 0) {
-            TextView change = PausaUi.text(c, Portfolio.percent(holding.gainRatio()), 12, tone, true);
+        if (holding.gainKnown()) {
+            TextView change = PausaUi.text(c, "Total " + Portfolio.percent(holding.gainRatio()), 11, tone, true);
             change.setPadding(0, dp(3), 0, 0);
             right.addView(change);
         }
+        if (holding.dailyKnown()) right.addView(PausaUi.text(c, "Sesión " + Portfolio.percent(holding.dailyRatio()), 11,
+                holding.dailyGain() >= 0 ? PausaUi.GREEN : PausaUi.TERRACOTTA, false));
         row.addView(right);
         row.setOnClickListener(v -> holdingSheet(holding, total));
-        row.setContentDescription(holding.name + ", " + (holding.valued() ? Budget.money(holding.value) + ", " + Portfolio.percent(holding.gainRatio()) : "sin precio"));
+        row.setContentDescription(holding.name + ", " + (holding.valued() ? Budget.money(holding.value) + (holding.gainKnown() ? ", PnL total " + change(holding.gain(), holding.gainRatio()) : ", PnL desconocido") : "sin precio"));
         return row;
     }
 
     private void holdingSheet(Portfolio.Holding holding, long total) {
         Context c = getContext();
         PausaUi.Sheet sheet = new PausaUi.Sheet(c, holding.name);
-        sheet.subtitle(holding.id + (holding.pricedAt > 0 ? " · precio del " + date(holding.pricedAt) : ""));
+        sheet.subtitle(holding.id + (holding.pricedAt > 0 ? " · precio del " + date(holding.pricedAt) : holding.receivedAt > 0 ? " · recibido el " + date(holding.receivedAt) + ", hora del precio desconocida" : ""));
         List<long[]> series = view.holdingHistory.get(holding.id);
         if (series != null && series.size() >= 2) {
             long[] at = new long[series.size()], values = new long[series.size()], costs = new long[series.size()];
-            for (int i = 0; i < series.size(); i++) { at[i] = series.get(i)[0]; values[i] = series.get(i)[1]; costs[i] = Math.max(0, series.get(i)[2]); }
+            for (int i = 0; i < series.size(); i++) { at[i] = series.get(i)[0]; values[i] = series.get(i)[1]; costs[i] = series.get(i)[2]; }
             MoneyMeters.ValueChart chart = new MoneyMeters.ValueChart(c, PausaUi.SAGE, PausaUi.MUTED, PausaUi.SURFACE);
             chart.set(at, values, costs, true);
             chart.setContentDescription("Evolución del valor de " + holding.name);
@@ -315,10 +321,14 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         List<String[]> facts = new ArrayList<>();
         if (holding.valued()) facts.add(new String[]{"Valor estimado", Budget.money(holding.value, true)});
         if (holding.cost >= 0) facts.add(new String[]{"Invertido", Budget.money(holding.cost, true)});
-        if (holding.valued() && holding.cost >= 0)
-            facts.add(new String[]{"Ganancia", (holding.gain() >= 0 ? "+" : "") + Budget.money(holding.gain(), true) + " · " + Portfolio.percent(holding.gainRatio())});
+        facts.add(new String[]{"PnL total (abierto)", holding.gainKnown() ? change(holding.gain(), holding.gainRatio()) : "No disponible"});
+        facts.add(new String[]{"PnL diario estimado", holding.dailyKnown() ? change(holding.dailyGain(), holding.dailyRatio()) : "Sin referencia"});
+        if (holding.dailyKnown()) {
+            facts.add(new String[]{"Sesión del precio", holding.dailySession});
+            facts.add(new String[]{"Referencia anterior", date(holding.referenceAt)});
+        }
         facts.add(new String[]{"Participaciones", Portfolio.quantity(holding.quantity)});
-        if (holding.averageBuyIn != null) facts.add(new String[]{"Precio medio de compra", Portfolio.price(holding.averageBuyIn)});
+        if (holding.averageBuyIn != null && holding.cost >= 0) facts.add(new String[]{"Precio medio de compra", Portfolio.price(holding.averageBuyIn)});
         if (holding.price != null) facts.add(new String[]{"Último precio", Portfolio.price(holding.price)});
         if (holding.valued()) facts.add(new String[]{"Peso en la cartera", Math.round(100f * holding.value / total) + " %"});
         for (String[] fact : facts) {
@@ -335,6 +345,8 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         sheet.footer(null, PausaUi.action(c, "Cerrar", false, sheet::dismiss));
         sheet.show();
     }
+
+    private static String change(long amount, double ratio) { return (amount > 0 ? "+" : "") + Budget.money(amount, true) + " · " + Portfolio.percent(ratio); }
 
     private static String captionFor(long[] point) {
         return date(point[0]) + " · " + Budget.money(point[1]) + (point[2] >= 0 ? " · invertido " + Budget.money(point[2]) : "");

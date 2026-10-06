@@ -8,7 +8,8 @@ habitual de ABANCA sigue siendo WebView y la de TR sigue usando su cliente nativ
 
 1. Instalar la APK 6.6 encima de la 6.5, sin desinstalar ni borrar datos.
 2. Sincronizar los bancos para tener productos identificados en SQLite.
-3. Banca → Cargar histórico inicial → seleccionar un archivo CSV/TXT.
+3. Bancos → Más opciones → Cargar histórico inicial → seleccionar un archivo CSV/TXT
+   (desde 6.7; en 6.6 estaba directamente en Banca).
 4. Revisar banco, número de registros, fechas y muestra. Seleccionar explícitamente
    la cuenta, tarjeta o préstamo correspondiente entre los productos sincronizados.
 5. Guardar y repetir con los demás archivos. La pantalla muestra registros conservados
