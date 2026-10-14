@@ -70,7 +70,8 @@ final class LegacyImport {
                     Map<String, Object> data = new HashMap<>();
                     data.put("title", task.getString("text"));
                     data.put("status", isDone ? "done" : "todo");
-                    data.put("completed_at", isDone ? now : null);
+                    // The old app never stored when a task was finished, so the time is unknown.
+                    data.put("completed_at", null);
                     // Old ids were creation times, which keeps the list in its order.
                     data.put("created_at", id);
                     data.put("following", task.optBoolean("following", false) ? 1 : 0);

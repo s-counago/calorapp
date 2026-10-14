@@ -17,7 +17,7 @@ import {
   getTask,
   listHabits,
   listTasks,
-  localDay,
+  currentDay,
   logMetric,
   setMetricTotal,
   setHabitCheck,
@@ -29,7 +29,7 @@ import {
 const PROTOCOL_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER_INFO = { name: 'pausa', title: 'Pausa', version: '1.0.0' };
 
-const day = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'Date as YYYY-MM-DD. Defaults to today in Europe/Madrid.' };
+const day = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'Date as YYYY-MM-DD. Defaults to today in Europe/Madrid; the day closes at 03:00, so 01:30 still counts as the previous day.' };
 const taskFields = {
   title: { type: 'string' },
   notes: { type: 'string' },
@@ -57,7 +57,7 @@ interface Tool {
 }
 
 function today(env: Env) {
-  return localDay(env.TIME_ZONE);
+  return currentDay(env.TIME_ZONE);
 }
 
 function dayArg(env: Env, value: unknown): string {
