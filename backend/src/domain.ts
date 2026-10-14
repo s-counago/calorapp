@@ -64,6 +64,7 @@ export interface TaskFilter {
   plan_date?: string;
   project?: string;
   due_before?: string;
+  following?: boolean;
   search?: string;
   limit?: number;
 }
@@ -74,6 +75,7 @@ export async function listTasks(db: D1Database, filter: TaskFilter = {}): Promis
   if (filter.status) { where.push('status = ?'); params.push(filter.status); }
   if (filter.plan_date) { where.push('plan_date = ?'); params.push(filter.plan_date); }
   if (filter.project) { where.push('project = ?'); params.push(filter.project); }
+  if (filter.following !== undefined) { where.push('following = ?'); params.push(filter.following ? 1 : 0); }
   if (filter.due_before) { where.push('due_date IS NOT NULL AND due_date <= ?'); params.push(filter.due_before); }
   if (filter.search) { where.push("(title LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')"); const like = `%${filter.search.replace(/[\\%_]/g, '\\$&')}%`; params.push(like, like); }
   const limit = Math.min(Math.max(filter.limit ?? 200, 1), 1000);
@@ -93,7 +95,7 @@ export async function getTask(db: D1Database, id: string): Promise<Task> {
   return taskFromRow(row);
 }
 
-const TASK_EDITABLE = ['title', 'notes', 'status', 'project', 'area', 'priority', 'due_date', 'plan_date', 'plan_slot', 'position', 'source', 'source_id'] as const;
+const TASK_EDITABLE = ['title', 'notes', 'status', 'project', 'area', 'priority', 'due_date', 'plan_date', 'plan_slot', 'position', 'source', 'source_id', 'following', 'waiting_for', 'expected_date', 'review_date'] as const;
 
 export async function createTask(db: D1Database, input: Record<string, unknown>): Promise<Task> {
   const id = typeof input.id === 'string' ? input.id : crypto.randomUUID();

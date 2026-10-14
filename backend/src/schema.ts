@@ -33,6 +33,10 @@ export const TABLES = {
       source: { type: 'text', max: 50 },
       source_id: { type: 'text', max: 200 },
       created_at: { type: 'int', required: true },
+      following: { type: 'bool', default: false },
+      waiting_for: { type: 'text', max: 500 },
+      expected_date: { type: 'day' },
+      review_date: { type: 'day' },
     },
   },
   habits: {

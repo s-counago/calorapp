@@ -40,6 +40,10 @@ const taskFields = {
   plan_date: { ...day, description: 'Day the task is planned for (YYYY-MM-DD).' },
   plan_slot: { type: 'string', enum: [...SLOTS], description: 'Part of the planned day.' },
   position: { type: 'number', description: 'Order inside the slot.' },
+  following: { type: 'boolean', description: 'True for a follow-up: the task waits on someone else and stays out of the day plan.' },
+  waiting_for: { type: 'string', description: 'Follow-ups only: who or what the task is waiting for.' },
+  expected_date: { ...day, description: 'Follow-ups only: when the answer is expected (YYYY-MM-DD).' },
+  review_date: { ...day, description: 'Follow-ups only: when to check on it again (YYYY-MM-DD).' },
 };
 
 interface Tool {
@@ -70,7 +74,7 @@ const TOOLS: Tool[] = [
   {
     name: 'list_tasks',
     title: 'List tasks',
-    description: 'Lists tasks, open ones first. Filter by status, planned day, project, due date or text.',
+    description: 'Lists tasks, open ones first. Filter by status, planned day, project, due date, follow-up or text.',
     readOnly: true,
     inputSchema: {
       type: 'object',
@@ -79,6 +83,7 @@ const TOOLS: Tool[] = [
         plan_date: taskFields.plan_date,
         project: { type: 'string' },
         due_before: { ...day, description: 'Only tasks due on or before this day.' },
+        following: { type: 'boolean', description: 'true for follow-ups only, false to leave them out.' },
         search: { type: 'string', description: 'Text to find in the title or notes.' },
         limit: { type: 'integer', minimum: 1, maximum: 1000 },
       },

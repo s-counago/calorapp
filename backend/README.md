@@ -12,7 +12,7 @@ Solo entra una cuenta de Google, la de `ALLOWED_EMAIL`. La banca no pasa por aqu
 
 | Tabla | Qué guarda |
 | --- | --- |
-| `tasks` | Tareas con proyecto, área, prioridad, fecha límite, día y franja del plan, y origen (`source`, `source_id`) para importar desde Notion. |
+| `tasks` | Tareas con proyecto, área, prioridad, fecha límite, día y franja del plan, origen (`source`, `source_id`) para importar desde Notion y seguimiento: `following` marca las tareas que esperan a alguien (`waiting_for`, `expected_date`, `review_date`) y no entran en el plan. |
 | `habits`, `habit_checks` | Hábitos con objetivo semanal y una fila por día hecho (`<habit_id>:<día>`). |
 | `metric_entries` | Calorías, proteína y cigarros como entradas sueltas (+300 kcal a las 14:02), no como un total. |
 | `settings` | Objetivos diarios (`calorie_goal`, `protein_goal`, `cigarette_goal`). |
@@ -42,7 +42,7 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | Ruta | Uso |
 | --- | --- |
 | `GET/POST /api/sync` | Sincronización (ver arriba). |
-| `GET /api/tasks` | Filtros: `status`, `plan_date`, `project`, `due_before`, `search`, `limit`. |
+| `GET /api/tasks` | Filtros: `status`, `plan_date`, `project`, `due_before`, `following` (`true`/`false`), `search`, `limit`. |
 | `POST /api/tasks`, `PATCH/DELETE /api/tasks/<id>` | Crear, editar y borrar. |
 | `GET/POST /api/habits`, `POST /api/habits/<id>/check` | Hábitos de la semana y marcar un día (`{ "day", "done" }`). |
 | `POST /api/counters` | `{ "kind": "calories" \| "protein" \| "cigarettes", "amount", "day" }`. |

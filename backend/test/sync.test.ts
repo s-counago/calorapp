@@ -48,6 +48,20 @@ describe('sync', () => {
     expect(changes[0].data.title).toBe('Nuevo');
   });
 
+  it('stores follow-ups and fills their defaults for older apps', async () => {
+    const token = await deviceToken();
+    await push(token, [
+      { table: 'tasks', id: 'f1', updated_at: 100, deleted: false, data: task({ following: true, waiting_for: 'Ana', expected_date: '2026-10-20', review_date: '2026-10-17' }) },
+      { table: 'tasks', id: 'old', updated_at: 100, deleted: false, data: task() },
+    ]);
+    const { changes } = await pull(token);
+    expect(changes[0].data).toMatchObject({ following: true, waiting_for: 'Ana', expected_date: '2026-10-20', review_date: '2026-10-17' });
+    expect(changes[1].data).toMatchObject({ following: false, waiting_for: null, expected_date: null, review_date: null });
+
+    const followups = (await (await json('/api/tasks?following=true', token)).json()) as any[];
+    expect(followups.map((item) => item.id)).toEqual(['f1']);
+  });
+
   it('spreads deletions as tombstones', async () => {
     const token = await deviceToken();
     await push(token, [{ table: 'tasks', id: 't1', updated_at: 100, deleted: false, data: task() }]);
