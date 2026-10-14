@@ -8,7 +8,7 @@
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": true },
   "d1_databases": [
-    // Create with `npx wrangler d1 create pausa` and paste the id here.
+    // Create with `npx wrangler d1 create pausa --location weur` and paste the id here.
     { "binding": "DB", "database_name": "pausa", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
   ],
   "kv_namespaces": [

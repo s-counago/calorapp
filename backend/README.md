@@ -84,7 +84,7 @@ npm run dev
 ## Despliegue
 
 1. `npx wrangler login`.
-2. `npx wrangler d1 create pausa` y `npx wrangler kv namespace create OAUTH_KV`. Copia los ids en `wrangler.jsonc`.
+2. `npx wrangler d1 create pausa --location weur` (Europa occidental, cerca de A Coruña) y `npx wrangler kv namespace create OAUTH_KV`. Copia los ids en `wrangler.jsonc`.
 3. `npm run db:migrate:remote`.
 4. En Google Cloud Console → APIs y servicios:
    - Pantalla de consentimiento OAuth de tipo externo, con tu cuenta como usuario de prueba.
@@ -94,3 +94,7 @@ npm run dev
 6. Pon la dirección final en `PUBLIC_URL` dentro de `wrangler.jsonc` y ejecuta `npm run deploy`.
 
 Todo cabe en el plan gratuito de Workers, D1 y KV para un solo usuario.
+
+## Arranque en frío
+
+Un Worker no es un contenedor que se apague: se ejecuta en un isolate de V8 que arranca en milisegundos, y este pesa unos 90 KB comprimido. La latencia real es la de D1, que vive en una sola región; por eso se crea en `weur`. La app Android no espera nunca al servidor: lee y escribe en local y sincroniza en segundo plano.
