@@ -99,19 +99,36 @@ final class CalorieStore {
     }
 
     static int total(Context context, String kind) {
+        return total(context, kind, today());
+    }
+
+    /** Total of a counter on any day (YYYY-MM-DD). */
+    static int total(Context context, String kind, String day) {
         LegacyImport.runOnce(context);
         for (Map<String, Object> row : PausaDb.get(context).rows(
-                "SELECT COALESCE(SUM(amount), 0) AS total FROM metric_entries WHERE deleted = 0 AND day = ? AND kind = ?", today(), kind)) {
+                "SELECT COALESCE(SUM(amount), 0) AS total FROM metric_entries WHERE deleted = 0 AND day = ? AND kind = ?", day, kind)) {
             return (int) Math.round(((Number) row.get("total")).doubleValue());
         }
         return 0;
     }
 
+    /**
+     * Fixes a forgotten day: sets its total by adding the difference as one correction entry, like
+     * set_counter in the backend, so entries made on another device still add up.
+     */
+    static void setTotal(Context context, String kind, String day, int total) {
+        log(context, kind, Math.max(0, total) - total(context, kind, day), day);
+    }
+
     private static void log(Context context, String kind, int amount) {
+        log(context, kind, amount, today());
+    }
+
+    private static void log(Context context, String kind, int amount, String day) {
         if (amount == 0) return;
         LegacyImport.runOnce(context);
         Map<String, Object> data = new HashMap<>();
-        data.put("day", today());
+        data.put("day", day);
         data.put("kind", kind);
         data.put("amount", (double) amount);
         data.put("at", System.currentTimeMillis());

@@ -99,6 +99,12 @@ public final class SyncStoreSmokeTest extends Instrumentation {
             check(CalorieStore.get(context) == 0, "reset is one negative entry");
             check(db.count("SELECT COUNT(*) FROM metric_entries WHERE kind = 'calories'") == 3, "three calorie entries");
             check(db.count("SELECT COUNT(*) FROM metric_entries WHERE kind = 'cigarettes'") == 0, "no entry when nothing changes");
+            String yesterday = DayPlanStore.day(-1);
+            CalorieStore.setTotal(context, "calories", yesterday, 2100);
+            CalorieStore.setTotal(context, "calories", yesterday, 1800);
+            CalorieStore.setTotal(context, "calories", yesterday, 1800);
+            check(CalorieStore.total(context, "calories", yesterday) == 1800 && CalorieStore.get(context) == 0, "a past day is fixed without touching today");
+            check(db.count("SELECT COUNT(*) FROM metric_entries WHERE day = ?", yesterday) == 2, "one correction entry per change, none when equal");
 
             // 4. Day plan lives on the task.
             long a = TaskStore.add(context, "A"), b = TaskStore.add(context, "B");

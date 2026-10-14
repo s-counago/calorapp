@@ -479,6 +479,7 @@ final class TodayView extends PausaUi.Scroll {
         });
         View limitRow = settingRow("Límite diario", PausaUi.number(limit) + " kcal", () -> { sheet.dismiss(); editCalorieLimit(); });
         sheet.add(limitRow, 4);
+        sheet.add(settingRow("Días anteriores", "Corregir", () -> { sheet.dismiss(); pastDaysSheet(DayPlanStore.day(-1)); }), 4);
         sheet.footer(PausaUi.quiet(activity, "Poner a cero", PausaUi.TERRACOTTA, () -> {
             sheet.dismiss();
             int previous = CalorieStore.get(activity);
@@ -502,6 +503,7 @@ final class TodayView extends PausaUi.Scroll {
             });
         });
         sheet.add(settingRow("Objetivo diario", CalorieStore.getProteinGoal(activity) + " g", () -> { sheet.dismiss(); editProteinGoal(); }), 4);
+        sheet.add(settingRow("Días anteriores", "Corregir", () -> { sheet.dismiss(); pastDaysSheet(DayPlanStore.day(-1)); }), 4);
         sheet.footer(PausaUi.quiet(activity, "Poner a cero", PausaUi.TERRACOTTA, () -> {
             sheet.dismiss();
             int previous = CalorieStore.getProtein(activity);
@@ -512,6 +514,58 @@ final class TodayView extends PausaUi.Scroll {
             });
         }), PausaUi.action(activity, "Listo", true, sheet::dismiss));
         sheet.show();
+    }
+
+    /** How many days back the counters can be corrected from the phone. */
+    static final int PAST_DAYS = 14;
+
+    /**
+     * Counters of a previous day, for the days they were not logged on time. Each total opens a
+     * number editor; saving adds one correction entry for that day, which syncs like any other.
+     */
+    void pastDaysSheet(String day) {
+        PausaUi.Sheet sheet = new PausaUi.Sheet(activity, "Días anteriores");
+        sheet.subtitle("Corrige lo que olvidaste apuntar. Se guarda en ese día.");
+        android.widget.HorizontalScrollView scroll = new android.widget.HorizontalScrollView(activity);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout days = new LinearLayout(activity);
+        SimpleDateFormat label = new SimpleDateFormat("EEE d", PausaUi.SPANISH);
+        for (int offset = -1; offset >= -PAST_DAYS; offset--) {
+            String option = DayPlanStore.day(offset);
+            String text = offset == -1 ? "Ayer" : label.format(parseDay(option));
+            TextView chip = PausaUi.chip(activity, text, option.equals(day), () -> { sheet.dismiss(); pastDaysSheet(option); });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = dp(8);
+            days.addView(chip, lp);
+        }
+        scroll.addView(days);
+        sheet.add(scroll, 12);
+        String title = new SimpleDateFormat("EEEE d 'de' MMMM", PausaUi.SPANISH).format(parseDay(day));
+        sheet.add(PausaUi.text(activity, title.substring(0, 1).toUpperCase(PausaUi.SPANISH) + title.substring(1), 15, PausaUi.MUTED, true), 8);
+        int calories = CalorieStore.total(activity, "calories", day), protein = CalorieStore.total(activity, "protein", day);
+        int cigarettes = CalorieStore.total(activity, "cigarettes", day);
+        sheet.add(settingRow("Calorías", PausaUi.number(calories) + " kcal", () -> editPastTotal(sheet, day, "calories", "Calorías", "Kilocalorías de ese día.", calories)), 4);
+        sheet.add(settingRow("Proteína", protein + " g", () -> editPastTotal(sheet, day, "protein", "Proteína", "Gramos de ese día.", protein)), 4);
+        sheet.add(settingRow("Cigarros", String.valueOf(cigarettes), () -> editPastTotal(sheet, day, "cigarettes", "Cigarros", "Cigarros de ese día.", cigarettes)), 4);
+        sheet.footer(null, PausaUi.action(activity, "Listo", true, sheet::dismiss));
+        sheet.show();
+    }
+
+    private void editPastTotal(PausaUi.Sheet sheet, String day, String kind, String name, String subtitle, int current) {
+        sheet.dismiss();
+        PausaUi.numberSheet(activity, name, subtitle, current, 0, "Introduce un número entero", value -> {
+            CalorieStore.setTotal(activity, kind, day, value);
+            PausaLog.i("counters", "Corrected " + kind + " on " + day + ": " + current + " -> " + value);
+            pastDaysSheet(day);
+            PausaUi.snack(activity, name + " del " + day.substring(8) + "/" + day.substring(5, 7) + " guardadas", "Deshacer", () -> {
+                CalorieStore.setTotal(activity, kind, day, current);
+            });
+        });
+    }
+
+    private static Date parseDay(String day) {
+        try { return new SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).parse(day); }
+        catch (java.text.ParseException e) { return new Date(); }
     }
 
     private EditText amountRow(PausaUi.Sheet sheet, String hint, PausaUi.IntResult onAdd) {

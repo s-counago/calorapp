@@ -115,6 +115,8 @@ describe('mcp', () => {
     await tool(token, 'check_habit', { habit_id: habit.structuredContent.id, day: '2026-10-14' });
     const counters = await tool(token, 'log_counter', { kind: 'protein', amount: 35, day: '2026-10-14' });
     expect(counters.structuredContent.protein.total).toBe(35);
+    const fixed = await tool(token, 'set_counter', { kind: 'protein', total: 120, day: '2026-10-14' });
+    expect(fixed.structuredContent).toMatchObject({ day: '2026-10-14', previous: 35, protein: { total: 120 } });
 
     const summary = await tool(token, 'day_summary', { day: '2026-10-14' });
     expect(summary.structuredContent.habits).toEqual([expect.objectContaining({ name: 'Meditar', done: true })]);

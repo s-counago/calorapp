@@ -41,6 +41,7 @@ import {
   localDay,
   logMetric,
   setHabitCheck,
+  setMetricTotal,
   updateTask,
   weeklyReview,
   type MetricKind,
@@ -319,6 +320,12 @@ app.post('/api/counters', async (c) => {
   const day = body.day ?? today(c);
   const id = await logMetric(c.env.DB, body.kind as MetricKind, body.amount, day);
   return c.json({ id }, 201);
+});
+
+app.put('/api/counters', async (c) => {
+  const body = await c.req.json<{ kind?: MetricKind; total?: unknown; day?: string }>();
+  const day = body.day ?? today(c);
+  return c.json(await setMetricTotal(c.env.DB, body.kind as MetricKind, body.total as number, day));
 });
 
 app.get('/api/day', async (c) => c.json(await daySummary(c.env.DB, dayQuery(c))));

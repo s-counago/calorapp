@@ -52,4 +52,19 @@ describe('api', () => {
     expect(review.counters.days_reaching_protein_goal).toBe(1);
     expect(review.habits).toEqual([expect.objectContaining({ name: 'Correr', days_done: 2, met: true })]);
   });
+
+  it('sets the total of a forgotten day with one correction entry', async () => {
+    const token = await deviceToken();
+    await json('/api/counters', token, { method: 'POST', body: JSON.stringify({ kind: 'calories', amount: 500, day: '2026-10-10' }) });
+    const set = (total: number) =>
+      json('/api/counters', token, { method: 'PUT', body: JSON.stringify({ kind: 'calories', total, day: '2026-10-10' }) });
+    expect(await (await set(2100)).json()).toMatchObject({ previous: 500, total: 2100 });
+    expect(await (await set(2100)).json()).toMatchObject({ id: null, previous: 2100 });
+    await set(1800);
+    const day = (await (await json('/api/day?day=2026-10-10', token)).json()) as any;
+    expect(day.counters.calories.total).toBe(1800);
+    const { changes } = (await (await json('/api/sync?since=0', token)).json()) as any;
+    expect(changes.map((change: any) => change.data.amount)).toEqual([500, 1600, -300]);
+    expect((await set(-1)).status).toBe(400);
+  });
 });
