@@ -67,7 +67,7 @@ final class PausaDb extends SQLiteOpenHelper {
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         // Each step adds what its version brought; never drop synced data.
         if (oldVersion < 2) {
-            // Kanban column of a task (stack, priority, vault, failed), see backend migration 0004.
+            // Kanban column of a task (stack, priority, vault, failed), see backend migration 0005.
             db.execSQL("ALTER TABLE tasks ADD COLUMN board TEXT");
             db.execSQL("CREATE INDEX tasks_board ON tasks (board, status)");
         }
