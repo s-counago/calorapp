@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
+        android:name=".PausaApp"
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
@@ -31,6 +32,8 @@
         <activity android:name=".AbancaArchiveActivity" android:exported="false" />
         <activity android:name=".BankingImportActivity" android:exported="false" />
         <activity android:name=".CalendarConnectionActivity" android:exported="false" />
+        <activity android:name=".CloudActivity" android:exported="false" />
+        <activity android:name=".DiagnosticsActivity" android:exported="false" />
         <service android:name=".CalendarSyncJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
 
         <activity

@@ -25,7 +25,7 @@ public final class HabitUiSmokeTest extends Instrumentation {
         Bundle result = new Bundle();
         try {
             Context context = getTargetContext();
-            context.getSharedPreferences("weekly_habits", 0).edit().clear().commit();
+            PausaTestData.reset(context);
             int goal = Math.min(2, HabitStore.daysElapsedThisWeek());
             HabitStore.add(context, "Llamar a mis abuelas", goal);
             getUiAutomation();

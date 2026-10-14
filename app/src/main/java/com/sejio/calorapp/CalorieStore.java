@@ -3,14 +3,20 @@ package com.sejio.calorapp;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
 final class CalorieStore {
-    private static final String PREFS_NAME = "calories";
-    private static final String KEY_TOTAL = "total";
-    private static final String KEY_CALORIE_LIMIT = "calorie_limit";
-    private static final String KEY_CIGARETTE_COUNT = "cigarette_count";
-    private static final String KEY_CIGARETTE_GOAL = "cigarette_goal";
-    private static final String KEY_PROTEIN_TOTAL = "protein_total";
-    private static final String KEY_PROTEIN_GOAL = "protein_goal";
+    static final String PREFS_NAME = "calories";
+    static final String KEY_TOTAL = "total";
+    static final String KEY_CALORIE_LIMIT = "calorie_limit";
+    static final String KEY_CIGARETTE_COUNT = "cigarette_count";
+    static final String KEY_CIGARETTE_GOAL = "cigarette_goal";
+    static final String KEY_PROTEIN_TOTAL = "protein_total";
+    static final String KEY_PROTEIN_GOAL = "protein_goal";
     private static final String KEY_NOTIFICATION_ENABLED = "notification_enabled";
     private static final int STEP = 100;
     private static final int DEFAULT_CIGARETTE_GOAL = 12;
@@ -18,8 +24,11 @@ final class CalorieStore {
     private CalorieStore() {
     }
 
+    // Counters are entries ("+300 kcal at 14:02") in metric_entries, summed per calendar day, so
+    // additions made offline here and on the web never overwrite each other. Goals are settings.
+
     static int get(Context context) {
-        return preferences(context).getInt(KEY_TOTAL, 0);
+        return total(context, "calories");
     }
 
     static int addStep(Context context) {
@@ -27,63 +36,101 @@ final class CalorieStore {
     }
 
     static int getCalorieLimit(Context context) {
-        return preferences(context).getInt(KEY_CALORIE_LIMIT, 2450);
+        return goal(context, "calorie_goal", 2450);
     }
 
     static void setCalorieLimit(Context context, int limit) {
         if (limit < 1) throw new IllegalArgumentException("El límite debe ser positivo");
-        preferences(context).edit().putInt(KEY_CALORIE_LIMIT, limit).apply();
+        setGoal(context, "calorie_goal", limit);
     }
 
     static int add(Context context, int amount) {
-        int total = get(context) + amount;
-        preferences(context).edit().putInt(KEY_TOTAL, total).apply();
-        return total;
+        log(context, "calories", amount);
+        return get(context);
     }
 
+    /** Clears today's calories with one negative entry, so the reset also reaches other devices. */
     static void reset(Context context) {
-        preferences(context).edit().putInt(KEY_TOTAL, 0).apply();
+        log(context, "calories", -get(context));
     }
 
     static int getCigaretteCount(Context context) {
-        return preferences(context).getInt(KEY_CIGARETTE_COUNT, 0);
+        return total(context, "cigarettes");
     }
 
     static int adjustCigaretteCount(Context context, int delta) {
-        int count = Math.max(0, getCigaretteCount(context) + delta);
-        preferences(context).edit().putInt(KEY_CIGARETTE_COUNT, count).apply();
-        return count;
+        int current = getCigaretteCount(context);
+        log(context, "cigarettes", Math.max(0, current + delta) - current);
+        return getCigaretteCount(context);
     }
 
     static int getCigaretteGoal(Context context) {
-        return preferences(context).getInt(KEY_CIGARETTE_GOAL, DEFAULT_CIGARETTE_GOAL);
+        return goal(context, "cigarette_goal", DEFAULT_CIGARETTE_GOAL);
     }
 
     static void setCigaretteGoal(Context context, int goal) {
-        int normalizedGoal = Math.max(1, goal);
-        preferences(context).edit().putInt(KEY_CIGARETTE_GOAL, normalizedGoal).apply();
+        setGoal(context, "cigarette_goal", Math.max(1, goal));
     }
 
     static int getProtein(Context context) {
-        return preferences(context).getInt(KEY_PROTEIN_TOTAL, 0);
+        return total(context, "protein");
     }
 
     static int addProtein(Context context, int grams) {
-        int total = Math.max(0, getProtein(context) + grams);
-        preferences(context).edit().putInt(KEY_PROTEIN_TOTAL, total).apply();
-        return total;
+        int current = getProtein(context);
+        log(context, "protein", Math.max(0, current + grams) - current);
+        return getProtein(context);
     }
 
     static int getProteinGoal(Context context) {
-        return preferences(context).getInt(KEY_PROTEIN_GOAL, 120);
+        return goal(context, "protein_goal", 120);
     }
 
     static void setProteinGoal(Context context, int grams) {
-        preferences(context).edit().putInt(KEY_PROTEIN_GOAL, Math.max(1, grams)).apply();
+        setGoal(context, "protein_goal", Math.max(1, grams));
     }
 
     static void resetProtein(Context context) {
-        preferences(context).edit().putInt(KEY_PROTEIN_TOTAL, 0).apply();
+        log(context, "protein", -getProtein(context));
+    }
+
+    static String today() {
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(new Date());
+    }
+
+    static int total(Context context, String kind) {
+        LegacyImport.runOnce(context);
+        for (Map<String, Object> row : PausaDb.get(context).rows(
+                "SELECT COALESCE(SUM(amount), 0) AS total FROM metric_entries WHERE deleted = 0 AND day = ? AND kind = ?", today(), kind)) {
+            return (int) Math.round(((Number) row.get("total")).doubleValue());
+        }
+        return 0;
+    }
+
+    private static void log(Context context, String kind, int amount) {
+        if (amount == 0) return;
+        LegacyImport.runOnce(context);
+        Map<String, Object> data = new HashMap<>();
+        data.put("day", today());
+        data.put("kind", kind);
+        data.put("amount", (double) amount);
+        data.put("at", System.currentTimeMillis());
+        PausaDb.get(context).put("metric_entries", PausaDb.uuid(), data, false);
+    }
+
+    static int goal(Context context, String key, int fallback) {
+        LegacyImport.runOnce(context);
+        Map<String, Object> row = PausaDb.get(context).row("settings", key);
+        if (row == null || Long.valueOf(1).equals(row.get("deleted"))) return fallback;
+        try { return (int) Math.round(Double.parseDouble((String) row.get("value"))); }
+        catch (RuntimeException invalid) { return fallback; }
+    }
+
+    private static void setGoal(Context context, String key, int value) {
+        LegacyImport.runOnce(context);
+        Map<String, Object> data = new HashMap<>();
+        data.put("value", String.valueOf(value));
+        PausaDb.get(context).put("settings", key, data, false);
     }
 
     static boolean isNotificationEnabled(Context context) {

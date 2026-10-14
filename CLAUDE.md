@@ -38,7 +38,20 @@ La banca (ABANCA, Trade Republic, presupuesto con movimientos y credenciales) se
 El objetivo es que cualquier fallo se pueda depurar sin tener el móvil delante.
 
 - **Backend:** usa `log(level, event, fields)` de `backend/src/log.ts`, nunca `console.log` suelto. Cada línea es JSON con `request_id`, `actor` y `source`. Los errores devuelven `{ error, code, request_id }`. Nunca registres tokens, secretos ni el contenido de los cuerpos de las peticiones.
-- **Android:** cada petición al backend envía `X-Request-Id` y registra el que devuelve el servidor, para cruzar las dos partes. *(Pendiente para la fase de sincronización en Android: un logger `PausaLog`, con la etiqueta `Pausa` en logcat, un archivo rotativo y subida de avisos y errores a `POST /api/logs`, más una pantalla oculta de Diagnóstico.)*
+- **Android:** usa `PausaLog` (etiqueta `Pausa` en logcat, archivo rotativo `files/logs/pausa.log`), nunca `android.util.Log` suelto. Los avisos, errores y eventos de la etiqueta `sync` se guardan en la cola `log_queue` y se suben a `POST /api/logs` en cada sincronización. Cada petición al backend envía `X-Request-Id` y lo registra junto con el que devuelve el servidor, para cruzar las dos partes. Los cierres inesperados quedan en el log (`PausaApp`). Nunca registres tokens, credenciales ni datos de la banca.
+
+## Android sin conexión
+
+- `PausaDb` (SQLite, `databases/pausa.db`) es la fuente de verdad del teléfono. Tiene las mismas tablas sincronizadas que el backend (`SyncSchema` es el espejo de `backend/src/schema.ts`: si añades un campo allí, añádelo también aquí y en `PausaDb.onCreate`/`onUpgrade`), más `outbox`, `sync_state`, `log_queue` y `habit_scores` (solo local).
+- Las vistas no cambian: `TaskStore`, `DayPlanStore`, `HabitStore` y `CalorieStore` leen y escriben `PausaDb`. Toda escritura pasa por `PausaDb.put`, que pone `updated_at`, encola el registro y pide una sincronización.
+- Tareas y hábitos conservan un `local_id` numérico (el id antiguo) para las vistas, las franjas de `TaskScheduleStore` y Google Calendar; el `id` del backend es un UUID.
+- El plan del día vive en la tarea (`plan_date`, `plan_slot`, `position`): una tarea está planificada como mucho en un día. El orden de la lista es el de creación.
+- Los contadores son entradas del día natural; reiniciar es una entrada negativa. Los objetivos son `settings`.
+- Los puntos de los hábitos se calculan en el teléfono a partir de los checks sincronizados.
+- Se quedan solo en el teléfono: banca, `TaskScheduleStore` y Google Calendar, rituales diarios, notificación y gráficas.
+- `PausaSync` programa `SyncWorker` con WorkManager (tras cada cambio, al abrir la app y cada 30 min, siempre con red). `SyncEngine` hace push por lotes, pull paginado y gana el último `updated_at`.
+- `LegacyImport` pasó una sola vez los datos de SharedPreferences a `PausaDb` y dejó las preferencias como copia.
+- Login: Ajustes → Nube (`CloudActivity`, `CloudAuth`): Credential Manager con el client ID web como `serverClientId`, `POST /auth/device` y token cifrado con Android Keystore. Necesita en Google Cloud una credencial Android con `com.sejio.calorapp` y la SHA-1 de la firma.
 
 ## Cómo depurar
 
@@ -46,14 +59,20 @@ El objetivo es que cualquier fallo se pueda depurar sin tener el móvil delante.
 2. **Logs de la app:** `GET /api/logs?level=warn` o `get_client_logs`.
 3. **Historial de un registro** (por qué cambió o desapareció): `GET /api/history/<tabla>/<id>` o `record_history`.
 4. **Logs del Worker:** `npx wrangler tail --format json` dentro de `backend/`, o Workers Logs en el panel de Cloudflare. Filtra por `request_id`.
-5. **Teléfono por adb**, solo cuando esté conectado al PC por USB o depuración inalámbrica:
+5. **Pantalla de Diagnóstico** en el teléfono: mantén pulsada la versión en Ajustes o el estado en Ajustes → Nube. Muestra estado, cursor, pendientes por tabla, último error y el log local, y permite forzar la sincronización.
+6. **Teléfono por adb**, solo cuando esté conectado al PC por USB o depuración inalámbrica:
    - `adb logcat -s Pausa:V AndroidRuntime:E`
+   - `adb shell run-as com.sejio.calorapp cat files/logs/pausa.log`
    - `adb shell run-as com.sejio.calorapp ls databases shared_prefs`
    - Instalar: `.\gradlew.bat assembleDebug` y `adb install -r app\build\outputs\apk\debug\app-debug.apk`
 
 ## Pruebas en Android
 
-Las pruebas instrumentadas (`PlannerSmokeTest`, `PausaUiSmokeTest`, `HabitStoreSmokeTest`, `HabitUiSmokeTest`, `PausaDemoSeed`…) **borran los datos de la app**. Ejecútalas solo en un emulador, nunca en el teléfono personal. Antes de instalar algo en el teléfono, confirma que la firma coincide con la de la app instalada: si no coincide, Android obliga a desinstalar y se pierden los datos locales que aún no estén sincronizados.
+Las pruebas instrumentadas (`PlannerSmokeTest`, `PausaUiSmokeTest`, `HabitStoreSmokeTest`, `HabitUiSmokeTest`, `SyncStoreSmokeTest`, `CloudSyncProbe`, `PausaDemoSeed`…) **borran los datos de la app**. Ejecútalas solo en un emulador, nunca en el teléfono personal. Antes de instalar algo en el teléfono, confirma que la firma coincide con la de la app instalada: si no coincide, Android obliga a desinstalar y se pierden los datos locales que aún no estén sincronizados.
+
+Cada prueba es su propio runner: `.\gradlew.bat assembleDebug assembleDebugAndroidTest -PuiTestRunner=com.sejio.calorapp.<Prueba>`, instala los dos APK en el emulador (`adb -s emulator-5554 install -r -t …`) y ejecuta `adb -s emulator-5554 shell am instrument -w com.sejio.calorapp.test/com.sejio.calorapp.<Prueba>`. Para reiniciar datos en una prueba usa `PausaTestData.reset`.
+
+**Sincronización de punta a punta sin tocar producción:** en `backend/`, crea `.dev.vars` a partir de `.dev.vars.example`, ejecuta `npm run db:migrate:local` y `npx wrangler dev --port 8787`, e inserta un dispositivo de prueba en la D1 local (`token_hash` = SHA-256 en base64url del token `pd_…`). Compila la app con `-PpausaApiUrl=http://10.0.2.2:8787 -PuiTestRunner=com.sejio.calorapp.CloudSyncProbe` (solo las compilaciones debug permiten HTTP a esa dirección) y ejecuta los pasos `-e step reset`, `-e step login -e token pd_…`, `-e step edit`, `-e step sync`, `-e step dump`. El modo avión se activa con `adb -s emulator-5554 shell cmd connectivity airplane-mode enable|disable`.
 
 ## Trabajo
 

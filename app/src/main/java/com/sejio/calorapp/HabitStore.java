@@ -1,6 +1,8 @@
 package com.sejio.calorapp;
 
+import android.content.ContentValues;
 import android.content.Context;
+import android.database.sqlite.SQLiteDatabase;
 import android.content.SharedPreferences;
 
 import org.json.JSONArray;
@@ -12,10 +14,14 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /** Persistence and scoring for habits that have a weekly minimum and one check per day. */
 final class HabitStore {
@@ -27,45 +33,76 @@ final class HabitStore {
 
     private HabitStore() {}
 
+    /**
+     * Habits and their checks sync with the backend (one habit_checks row per day done). Points are
+     * derived here from the checks and kept in the local habit_scores table; weeks whose checks or
+     * goal changed on another device are scored again when they are read.
+     */
     static List<Habit> getAll(Context context) {
+        LegacyImport.runOnce(context);
+        PausaDb db = PausaDb.get(context);
         List<Habit> habits = new ArrayList<>();
-        String stored = preferences(context).getString(KEY_HABITS, "[]");
-        boolean changed = false;
-        try {
-            JSONArray array = new JSONArray(stored);
-            for (int index = 0; index < array.length(); index++) {
-                JSONObject object = array.getJSONObject(index);
-                Habit habit = new Habit(
-                        object.getLong("id"),
-                        object.getString("name"),
-                        clampGoal(object.optInt("weeklyGoal", 1)),
-                        object.optString("createdDay", today())
-                );
-                readStrings(object.optJSONArray("completedDays"), habit.completedDays);
-                readIntegers(object.optJSONObject("rewardsByDay"), habit.rewardsByDay);
-                readIntegers(object.optJSONObject("baseRewards"), habit.baseRewards);
-                readStrings(object.optJSONObject("baseAwardDays"), habit.baseAwardDays);
-                readIntegers(object.optJSONObject("penaltiesByWeek"), habit.penaltiesByWeek);
-                readIntegers(object.optJSONObject("completionAdjustmentsByWeek"), habit.completionAdjustmentsByWeek);
-                changed |= settleFinishedWeeks(habit);
-                habits.add(habit);
+        for (Map<String, Object> row : db.rows("SELECT * FROM habits WHERE deleted = 0 AND archived = 0 ORDER BY position, local_id")) {
+            Habit habit = new Habit((Long) row.get("local_id"), (String) row.get("name"),
+                    clampGoal(((Long) row.get("weekly_goal")).intValue()), (String) row.get("created_day"));
+            habit.uid = (String) row.get("id");
+            for (Map<String, Object> check : db.rows("SELECT day FROM habit_checks WHERE habit_id = ? AND deleted = 0 ORDER BY day", habit.uid)) {
+                habit.completedDays.add((String) check.get("day"));
             }
-        } catch (JSONException ignored) {
-            // A damaged entry must not make the whole screen unusable.
+            List<String> scoredDays = new ArrayList<>();
+            int scoredGoal = habit.weeklyGoal;
+            List<Map<String, Object>> scores = db.rows("SELECT json FROM habit_scores WHERE habit_id = ?", habit.uid);
+            try {
+                if (!scores.isEmpty()) {
+                    JSONObject object = new JSONObject((String) scores.get(0).get("json"));
+                    readIntegers(object.optJSONObject("rewardsByDay"), habit.rewardsByDay);
+                    readIntegers(object.optJSONObject("baseRewards"), habit.baseRewards);
+                    readStrings(object.optJSONObject("baseAwardDays"), habit.baseAwardDays);
+                    readIntegers(object.optJSONObject("penaltiesByWeek"), habit.penaltiesByWeek);
+                    readIntegers(object.optJSONObject("completionAdjustmentsByWeek"), habit.completionAdjustmentsByWeek);
+                    readStrings(object.optJSONArray("scoredDays"), scoredDays);
+                    scoredGoal = object.optInt("scoredGoal", habit.weeklyGoal);
+                }
+            } catch (JSONException ignored) {
+                // A damaged score is rebuilt from the checks below.
+            }
+            boolean changed = rescore(habit, scoredDays, scoredGoal);
+            changed |= settleFinishedWeeks(habit);
+            if (changed) saveScore(db, habit);
+            habits.add(habit);
         }
-        if (changed) save(context, habits);
         return habits;
+    }
+
+    /** Scores again, oldest first, every week whose checks differ from the ones last scored. */
+    static boolean rescore(Habit habit, List<String> scoredDays, int scoredGoal) {
+        Set<String> weeks = new TreeSet<>();
+        Set<String> now = new HashSet<>(habit.completedDays), before = new HashSet<>(scoredDays);
+        for (String day : now) if (!before.contains(day)) weeks.add(weekStart(day));
+        for (String day : before) if (!now.contains(day)) weeks.add(weekStart(day));
+        if (scoredGoal != habit.weeklyGoal) weeks.add(weekStart(today()));
+        for (String week : weeks) {
+            String latest = latestCompletionInWeek(habit, week);
+            rebuildWeekRewards(habit, week, latest == null ? week : latest);
+        }
+        return !weeks.isEmpty();
     }
 
     static long add(Context context, String name, int weeklyGoal) {
         String normalized = name.trim();
         if (normalized.isEmpty()) return -1;
-        List<Habit> habits = getAll(context);
-        long id = System.currentTimeMillis();
-        while (find(habits, id) != null) id++;
-        habits.add(new Habit(id, normalized, clampGoal(weeklyGoal), today()));
-        save(context, habits);
-        return id;
+        LegacyImport.runOnce(context);
+        PausaDb db = PausaDb.get(context);
+        long localId = System.currentTimeMillis();
+        for (Map<String, Object> row : db.rows("SELECT MAX(local_id) AS max FROM habits")) {
+            if (row.get("max") != null) localId = Math.max(localId, (Long) row.get("max") + 1);
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("name", normalized);
+        data.put("weekly_goal", clampGoal(weeklyGoal));
+        data.put("created_day", today());
+        data.put("archived", 0);
+        return db.put("habits", PausaDb.uuid(), data, false, localId);
     }
 
     static void update(Context context, long id, String name, int weeklyGoal) {
@@ -97,12 +134,8 @@ final class HabitStore {
     }
 
     static void delete(Context context, long id) {
-        List<Habit> habits = getAll(context);
-        Habit habit = find(habits, id);
-        if (habit != null) {
-            habits.remove(habit);
-            save(context, habits);
-        }
+        Habit habit = find(getAll(context), id);
+        if (habit != null) PausaDb.get(context).put("habits", habit.uid, new HashMap<>(), true);
     }
 
     static ToggleResult setDoneToday(Context context, long id, boolean done) {
@@ -355,27 +388,79 @@ final class HabitStore {
         return null;
     }
 
+    /** Writes what changed: the habit row, added or removed checks, and the local score. */
     private static void save(Context context, List<Habit> habits) {
-        JSONArray array = new JSONArray();
+        PausaDb db = PausaDb.get(context);
         for (Habit habit : habits) {
-            try {
-                JSONObject object = new JSONObject();
-                object.put("id", habit.id);
-                object.put("name", habit.name);
-                object.put("weeklyGoal", habit.weeklyGoal);
-                object.put("createdDay", habit.createdDay);
-                object.put("completedDays", strings(habit.completedDays));
-                object.put("rewardsByDay", integers(habit.rewardsByDay));
-                object.put("baseRewards", integers(habit.baseRewards));
-                object.put("baseAwardDays", strings(habit.baseAwardDays));
-                object.put("penaltiesByWeek", integers(habit.penaltiesByWeek));
-                object.put("completionAdjustmentsByWeek", integers(habit.completionAdjustmentsByWeek));
-                array.put(object);
-            } catch (JSONException ignored) {
-                // All values are JSON primitives.
+            Map<String, Object> row = db.row("habits", habit.uid);
+            if (row == null || !habit.name.equals(row.get("name")) || habit.weeklyGoal != ((Long) row.get("weekly_goal")).intValue()) {
+                Map<String, Object> data = new HashMap<>();
+                data.put("name", habit.name);
+                data.put("weekly_goal", habit.weeklyGoal);
+                data.put("created_day", habit.createdDay);
+                db.put("habits", habit.uid, data, false, habit.id);
             }
+            Set<String> stored = new HashSet<>();
+            for (Map<String, Object> check : db.rows("SELECT day FROM habit_checks WHERE habit_id = ? AND deleted = 0", habit.uid)) {
+                stored.add((String) check.get("day"));
+            }
+            for (String day : habit.completedDays) if (!stored.contains(day)) putCheck(db, habit.uid, day, true);
+            for (String day : stored) if (!habit.completedDays.contains(day)) putCheck(db, habit.uid, day, false);
+            saveScore(db, habit);
         }
-        preferences(context).edit().putString(KEY_HABITS, array.toString()).apply();
+    }
+
+    private static void putCheck(PausaDb db, String habitId, String day, boolean done) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("habit_id", habitId);
+        data.put("day", day);
+        db.put("habit_checks", habitId + ":" + day, data, !done);
+    }
+
+    static void saveScore(PausaDb db, Habit habit) {
+        try {
+            ContentValues values = new ContentValues();
+            values.put("habit_id", habit.uid);
+            values.put("json", scoreJson(habit).toString());
+            db.getWritableDatabase().insertWithOnConflict("habit_scores", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        } catch (JSONException ignored) {
+            // All values are JSON primitives.
+        }
+    }
+
+    static JSONObject scoreJson(Habit habit) throws JSONException {
+        JSONObject object = new JSONObject();
+        object.put("rewardsByDay", integers(habit.rewardsByDay));
+        object.put("baseRewards", integers(habit.baseRewards));
+        object.put("baseAwardDays", strings(habit.baseAwardDays));
+        object.put("penaltiesByWeek", integers(habit.penaltiesByWeek));
+        object.put("completionAdjustmentsByWeek", integers(habit.completionAdjustmentsByWeek));
+        object.put("scoredDays", strings(habit.completedDays));
+        object.put("scoredGoal", habit.weeklyGoal);
+        return object;
+    }
+
+    /** Old SharedPreferences habits, read once by LegacyImport. */
+    static List<Habit> legacy(Context context) {
+        List<Habit> habits = new ArrayList<>();
+        try {
+            JSONArray array = new JSONArray(preferences(context).getString(KEY_HABITS, "[]"));
+            for (int index = 0; index < array.length(); index++) {
+                JSONObject object = array.getJSONObject(index);
+                Habit habit = new Habit(object.getLong("id"), object.getString("name"),
+                        clampGoal(object.optInt("weeklyGoal", 1)), object.optString("createdDay", today()));
+                readStrings(object.optJSONArray("completedDays"), habit.completedDays);
+                readIntegers(object.optJSONObject("rewardsByDay"), habit.rewardsByDay);
+                readIntegers(object.optJSONObject("baseRewards"), habit.baseRewards);
+                readStrings(object.optJSONObject("baseAwardDays"), habit.baseAwardDays);
+                readIntegers(object.optJSONObject("penaltiesByWeek"), habit.penaltiesByWeek);
+                readIntegers(object.optJSONObject("completionAdjustmentsByWeek"), habit.completionAdjustmentsByWeek);
+                habits.add(habit);
+            }
+        } catch (JSONException ignored) {
+            // A damaged entry is skipped; the old preferences stay as a backup.
+        }
+        return habits;
     }
 
     private static JSONArray strings(List<String> values) {
@@ -428,6 +513,8 @@ final class HabitStore {
 
     static final class Habit {
         final long id;
+        /** Backend id (UUID). */
+        String uid;
         String name;
         int weeklyGoal;
         final String createdDay;

@@ -285,6 +285,7 @@ app.get('/api/tasks', async (c) => {
       plan_date: query.plan_date,
       project: query.project,
       due_before: query.due_before,
+      following: query.following === undefined ? undefined : query.following === 'true',
       search: query.search,
       limit: query.limit ? Number(query.limit) : undefined,
     }),

@@ -24,7 +24,7 @@ public final class PausaDemoSeed extends Instrumentation {
             for (String prefs : new String[]{"daily_tasks", "day_boards", "short_term_planner", "weekly_habits", "calories"}) {
                 c.getSharedPreferences(prefs, 0).edit().clear().commit();
             }
-            c.getSharedPreferences("day_boards", 0).edit().putBoolean("migrated", true).commit();
+            PausaTestData.reset(c);
             CalorieStore.add(c, 1240);
             CalorieStore.addProtein(c, 85);
             CalorieStore.adjustCigaretteCount(c, 4);

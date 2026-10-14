@@ -10,9 +10,16 @@ android {
         applicationId "com.sejio.calorapp"
         minSdk 23
         targetSdk 35
-        versionCode 28
-        versionName "6.8.3"
+        versionCode 29
+        versionName "6.9.0"
         testInstrumentationRunner project.findProperty("uiTestRunner") ?: "com.sejio.calorapp.PlannerSmokeTest"
+        // Pausa backend and the Google OAuth web client used as serverClientId. Neither is secret.
+        buildConfigField "String", "PAUSA_API_URL", "\"${project.findProperty("pausaApiUrl") ?: "https://pausa.s-counago00.workers.dev"}\""
+        buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("googleWebClientId") ?: "701210691229-h49288muj49qmvo33k5h0cfi2alppppc.apps.googleusercontent.com"}\""
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     signingConfigs {
@@ -38,6 +45,10 @@ android {
 
 dependencies {
     implementation "com.google.android.gms:play-services-auth:21.4.0"
+    implementation "androidx.work:work-runtime:2.10.1"
+    implementation "androidx.credentials:credentials:1.5.0"
+    implementation "androidx.credentials:credentials-play-services-auth:1.5.0"
+    implementation "com.google.android.libraries.identity.googleid:googleid:1.1.1"
     implementation "androidx.webkit:webkit:1.15.0"
     implementation "com.squareup.okhttp3:okhttp:5.3.2"
     testImplementation "junit:junit:4.13.2"

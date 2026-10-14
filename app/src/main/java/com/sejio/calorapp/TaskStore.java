@@ -3,18 +3,16 @@ package com.sejio.calorapp;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
-
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
 
 final class TaskStore {
-    private static final String PREFS_NAME = "daily_tasks";
-    private static final String KEY_TASKS = "tasks";
+    static final String PREFS_NAME = "daily_tasks";
+    static final String KEY_TASKS = "tasks";
     private static final String KEY_NOTION_REVIEW_DONE = "notion_review_done";
     private static final String KEY_NOTION_REVIEW_PERIOD = "notion_review_period";
     private static final String KEY_HABIT_REVIEW_DONE = "habit_review_done";
@@ -23,26 +21,20 @@ final class TaskStore {
     }
 
     static List<Task> getAll(Context context) {
+        LegacyImport.runOnce(context);
         List<Task> tasks = new ArrayList<>();
-        String storedTasks = preferences(context).getString(KEY_TASKS, "[]");
-
-        try {
-            JSONArray jsonTasks = new JSONArray(storedTasks);
-            for (int index = 0; index < jsonTasks.length(); index++) {
-                JSONObject jsonTask = jsonTasks.getJSONObject(index);
-                tasks.add(new Task(
-                        jsonTask.getLong("id"),
-                        jsonTask.getString("text"),
-                        jsonTask.optBoolean("done", false),
-                        jsonTask.optBoolean("following", false), jsonTask.optString("waitingFor"),
-                        jsonTask.optString("expectedDate"), jsonTask.optString("reviewDate")
-                ));
-            }
-        } catch (JSONException ignored) {
-            // Keep the screen usable if the stored data is ever malformed.
+        // List order is creation order; `position` belongs to the day plan (see DayPlanStore).
+        for (Map<String, Object> row : PausaDb.get(context).rows(
+                "SELECT * FROM tasks WHERE deleted = 0 AND status != 'cancelled' ORDER BY created_at, local_id")) {
+            tasks.add(fromRow(row));
         }
-
         return tasks;
+    }
+
+    static Task fromRow(Map<String, Object> row) {
+        return new Task((Long) row.get("local_id"), (String) row.get("title"), "done".equals(row.get("status")),
+                Long.valueOf(1).equals(row.get("following")), text(row.get("waiting_for")),
+                text(row.get("expected_date")), text(row.get("review_date")));
     }
 
     static long add(Context context, String text) {
@@ -50,27 +42,31 @@ final class TaskStore {
         if (normalizedText.isEmpty()) {
             return -1;
         }
-
-        List<Task> tasks = getAll(context);
-        long id = System.currentTimeMillis();
-        while (containsId(tasks, id)) {
-            id++;
-        }
-        tasks.add(new Task(id, normalizedText, false));
-        save(context, tasks);
+        LegacyImport.runOnce(context);
+        Map<String, Object> data = new HashMap<>();
+        data.put("title", normalizedText);
+        data.put("status", "todo");
+        data.put("created_at", System.currentTimeMillis());
+        data.put("following", 0);
+        long id = PausaDb.get(context).put("tasks", PausaDb.uuid(), data, false, nextLocalId(context));
+        changed(context);
         return id;
     }
 
-    static void setDone(Context context, long id, boolean done) {
-        List<Task> tasks = getAll(context);
-        for (int index = 0; index < tasks.size(); index++) {
-            Task task = tasks.get(index);
-            if (task.id == id) {
-                tasks.set(index, task.copy(task.text, done));
-                save(context, tasks);
-                return;
-            }
+    /** Keeps the old id scheme (creation milliseconds) so new ids never collide with imported ones. */
+    private static long nextLocalId(Context context) {
+        long max = 0;
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT MAX(local_id) AS max FROM tasks")) {
+            if (row.get("max") != null) max = (Long) row.get("max");
         }
+        return Math.max(System.currentTimeMillis(), max + 1);
+    }
+
+    static void setDone(Context context, long id, boolean done) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("status", done ? "done" : "todo");
+        data.put("completed_at", done ? System.currentTimeMillis() : null);
+        update(context, id, data);
     }
 
     static void setText(Context context, long id, String text) {
@@ -78,38 +74,28 @@ final class TaskStore {
         if (normalizedText.isEmpty()) {
             return;
         }
-
-        List<Task> tasks = getAll(context);
-        for (int index = 0; index < tasks.size(); index++) {
-            Task task = tasks.get(index);
-            if (task.id == id) {
-                tasks.set(index, task.copy(normalizedText, task.done));
-                save(context, tasks);
-                return;
-            }
-        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("title", normalizedText);
+        update(context, id, data);
     }
 
     static void delete(Context context, long id) {
-        List<Task> tasks = getAll(context);
-        for (int index = 0; index < tasks.size(); index++) {
-            if (tasks.get(index).id == id) {
-                tasks.remove(index);
-                save(context, tasks);
-                return;
-            }
-        }
+        String uid = uid(context, id);
+        if (uid == null) return;
+        PausaDb.get(context).put("tasks", uid, new HashMap<>(), true);
+        changed(context);
     }
 
     static void setFollowup(Context context, long id, boolean following, String waitingFor, String expectedDate, String reviewDate) {
-        List<Task> tasks = getAll(context);
-        for (int i = 0; i < tasks.size(); i++) {
-            Task task = tasks.get(i);
-            if (task.id != id) continue;
-            tasks.set(i, new Task(id, task.text, following ? false : task.done, following, waitingFor.trim(), expectedDate, reviewDate));
-            save(context, tasks);
-            return;
-        }
+        Task task = find(context, id);
+        if (task == null) return;
+        Map<String, Object> data = new HashMap<>();
+        data.put("following", following ? 1 : 0);
+        data.put("waiting_for", empty(waitingFor.trim()));
+        data.put("expected_date", empty(expectedDate));
+        data.put("review_date", empty(reviewDate));
+        if (following && task.done) { data.put("status", "todo"); data.put("completed_at", null); }
+        update(context, id, data);
     }
 
     static int indexOf(Context context, long id) {
@@ -122,16 +108,54 @@ final class TaskStore {
 
     /** Puts a deleted task back with its original id, so plan references come back with it. */
     static void restore(Context context, Task task, int index) {
-        List<Task> tasks = getAll(context);
-        if (containsId(tasks, task.id)) return;
-        tasks.add(Math.max(0, Math.min(index < 0 ? tasks.size() : index, tasks.size())), task);
-        save(context, tasks);
+        if (find(context, task.id) != null) return;
+        String uid = uid(context, task.id);
+        Map<String, Object> data = new HashMap<>();
+        data.put("title", task.text);
+        data.put("status", task.done ? "done" : "todo");
+        data.put("following", task.following ? 1 : 0);
+        data.put("waiting_for", empty(task.waitingFor));
+        data.put("expected_date", empty(task.expectedDate));
+        data.put("review_date", empty(task.reviewDate));
+        // The tombstone keeps created_at, so the task returns to its old place in the list.
+        if (uid == null) {
+            data.put("created_at", System.currentTimeMillis());
+            PausaDb.get(context).put("tasks", PausaDb.uuid(), data, false, task.id);
+        } else {
+            PausaDb.get(context).put("tasks", uid, data, false);
+        }
+        changed(context);
     }
 
     static Task find(Context context, long id) {
-        for (Task task : getAll(context)) if (task.id == id) return task;
+        for (Map<String, Object> row : PausaDb.get(context).rows(
+                "SELECT * FROM tasks WHERE local_id = ? AND deleted = 0 AND status != 'cancelled'", String.valueOf(id))) {
+            return fromRow(row);
+        }
         return null;
     }
+
+    /** The backend id of a task (also of a deleted one), or null. */
+    static String uid(Context context, long id) {
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT id FROM tasks WHERE local_id = ?", String.valueOf(id))) {
+            return (String) row.get("id");
+        }
+        return null;
+    }
+
+    static void update(Context context, long id, Map<String, Object> data) {
+        String uid = uid(context, id);
+        if (uid == null) return;
+        PausaDb.get(context).put("tasks", uid, data, false);
+        changed(context);
+    }
+
+    private static void changed(Context context) {
+        CalendarSync.request(context);
+    }
+
+    private static String text(Object value) { return value == null ? "" : value.toString(); }
+    private static String empty(String value) { return value == null || value.isEmpty() ? null : value; }
 
     static boolean isNotionReviewDone(Context context) {
         resetDailyNotionReview(context);
@@ -178,37 +202,6 @@ final class TaskStore {
                 period.get(Calendar.MONTH) + 1,
                 period.get(Calendar.DAY_OF_MONTH)
         );
-    }
-
-    private static boolean containsId(List<Task> tasks, long id) {
-        for (Task task : tasks) {
-            if (task.id == id) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static void save(Context context, List<Task> tasks) {
-        JSONArray jsonTasks = new JSONArray();
-        for (Task task : tasks) {
-            JSONObject jsonTask = new JSONObject();
-            try {
-                jsonTask.put("id", task.id);
-                jsonTask.put("text", task.text);
-                jsonTask.put("done", task.done);
-                jsonTask.put("following", task.following);
-                jsonTask.put("waitingFor", task.waitingFor);
-                jsonTask.put("expectedDate", task.expectedDate);
-                jsonTask.put("reviewDate", task.reviewDate);
-                jsonTasks.put(jsonTask);
-            } catch (JSONException ignored) {
-                // These primitive values are always valid JSON.
-            }
-        }
-
-        preferences(context).edit().putString(KEY_TASKS, jsonTasks.toString()).apply();
-        CalendarSync.request(context);
     }
 
     private static SharedPreferences preferences(Context context) {
