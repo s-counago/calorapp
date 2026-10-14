@@ -28,6 +28,7 @@ final class Ledger {
         final int valueDay;
         Kind kind;
         String category;
+        String productId = "", productKind = "", duplicateOf = "";
         /** reward: money the bank gives back (Trade Republic saveback), later invested on the owner's behalf. */
         boolean salary, duplicate, reward;
 
@@ -148,6 +149,8 @@ final class Ledger {
         if (type.equals("card")) {
             Kind kind = cardKind(data.optString("operationType"), cents);
             Txn txn = new Txn(id, bank, "card", label.isEmpty() ? "Tarjeta ABANCA" : label, day, valueDay, cents, description, kind, null);
+            txn.productId = row.optString("productId", bank + ":" + label);
+            txn.productKind = row.optString("productKind");
             txn.category = guessCategory(txn.haystack());
             return txn;
         }
@@ -209,16 +212,51 @@ final class Ledger {
     /** Debit-card purchases appear twice: on the card and, days later, in the account. Keep the card copy. */
     private static void pairCardCharges(List<Txn> txns) {
         List<Txn> cards = new ArrayList<>();
-        for (Txn txn : txns) if (txn.source.equals("card") && txn.cents < 0) cards.add(txn);
-        boolean[] used = new boolean[cards.size()];
-        for (Txn txn : txns) {
-            if (!txn.source.equals("account") || txn.cents >= 0 || !CARD_PREFIX.matcher(txn.raw.trim()).find()) continue;
-            for (int i = 0; i < cards.size(); i++) {
-                Txn card = cards.get(i);
-                if (used[i] || card.cents != txn.cents || Math.abs(card.day - txn.valueDay) > 3) continue;
-                used[i] = true; txn.duplicate = true; txn.kind = Kind.IGNORED; break;
+        for (Txn txn : txns) if (txn.source.equals("card") && (txn.kind == Kind.SPEND || txn.kind == Kind.REFUND)) cards.add(txn);
+        List<CardPair> pairs = new ArrayList<>();
+        for (Txn account : txns) {
+            if (!account.bank.equals("abanca") || !account.source.equals("account") || account.cents == 0 || !cardAccountCopy(account)) continue;
+            for (Txn card : cards) {
+                if (!card.bank.equals(account.bank) || card.cents != account.cents || Math.abs(card.day - account.valueDay) > 3) continue;
+                String accountMerchant = cardMerchant(account.raw), cardMerchant = cardMerchant(card.raw);
+                if (accountMerchant.length() < 3 || cardMerchant.length() < 3) continue;
+                boolean exact = accountMerchant.equals(cardMerchant);
+                if (!exact && !accountMerchant.startsWith(cardMerchant + " ") && !cardMerchant.startsWith(accountMerchant + " ")) continue;
+                pairs.add(new CardPair(account, card, exact));
             }
         }
+        Collections.sort(pairs, (a, b) -> {
+            int order = Integer.compare(Math.abs(a.account.valueDay - a.card.day), Math.abs(b.account.valueDay - b.card.day));
+            if (order == 0) order = Boolean.compare(b.exact, a.exact);
+            if (order == 0) order = a.account.id.compareTo(b.account.id);
+            return order == 0 ? a.card.id.compareTo(b.card.id) : order;
+        });
+        java.util.Set<String> accountsUsed = new java.util.HashSet<>(), cardsUsed = new java.util.HashSet<>();
+        for (CardPair pair : pairs) {
+            if (accountsUsed.contains(pair.account.id) || cardsUsed.contains(pair.card.id)) continue;
+            accountsUsed.add(pair.account.id); cardsUsed.add(pair.card.id);
+            pair.account.duplicate = true; pair.account.kind = Kind.IGNORED; pair.account.duplicateOf = pair.card.id;
+        }
+    }
+
+    private static boolean cardAccountCopy(Txn txn) {
+        String text = key(txn.raw);
+        return CARD_PREFIX.matcher(txn.raw.trim()).find() || text.contains("TIPO OPERACIONES TARJETA DEBITO")
+                || text.contains("TIPO OPERACIONES T P V");
+    }
+
+    private static String cardMerchant(String raw) {
+        String merchant = CARD_PREFIX.matcher(raw.trim()).replaceFirst("")
+                .replaceFirst("(?iu)\\s+Fecha operaci[oó]n:.*$", "");
+        int city = merchant.indexOf('\\');
+        if (city >= 0) merchant = merchant.substring(0, city);
+        return key(merchant);
+    }
+
+    private static final class CardPair {
+        final Txn account, card;
+        final boolean exact;
+        CardPair(Txn account, Txn card, boolean exact) { this.account = account; this.card = card; this.exact = exact; }
     }
 
     // ------------------------------------------------------------ text

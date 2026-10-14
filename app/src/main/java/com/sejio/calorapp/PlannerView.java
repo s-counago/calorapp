@@ -191,7 +191,8 @@ final class PlannerView extends LinearLayout {
         card.setMinimumHeight(dp(52));
         card.setPadding(dayOffset == 0 ? dp(2) : dp(16), dp(2), dp(6), dp(2));
         card.setBackground(PausaUi.ripple(getContext(), PausaUi.CREAM, 16));
-        TextView text = PausaUi.text(getContext(), task.text, 16, PausaUi.INK, false);
+        String timing = TaskScheduleStore.describe(getContext(), task.id, date);
+        TextView text = PausaUi.text(getContext(), task.text + (timing.isEmpty() ? "" : "\n" + timing), 16, PausaUi.INK, false);
         text.setLineSpacing(0, 1.1f);
         text.setPadding(0, dp(10), dp(8), dp(10));
         if (dayOffset == 0) {
@@ -252,6 +253,12 @@ final class PlannerView extends LinearLayout {
                 return true;
             case DragEvent.ACTION_DROP:
                 placeGap(event.getY());
+                TaskScheduleStore.Schedule timed = TaskScheduleStore.first(getContext(), draggedId, date);
+                if (timed != null && (timed.minute() < 720 ? 0 : timed.minute() < 1200 ? 1 : 2) != dropSection) {
+                    int minute = new int[]{9 * 60, 15 * 60, 21 * 60}[dropSection] + timed.minute() % 60;
+                    TaskScheduleStore.put(getContext(), timed.id, draggedId, TaskScheduleStore.start(date, minute), timed.minutes);
+                    PausaUi.snack(getContext(), String.format(java.util.Locale.ROOT, "Hora actualizada · %02d:%02d", minute / 60, minute % 60), null, null);
+                }
                 for (List<Long> section : plan) section.remove(draggedId);
                 plan.get(dropSection).add(Math.min(dropIndex, plan.get(dropSection).size()), draggedId);
                 DayPlanStore.save(getContext(), date, plan);
@@ -361,7 +368,7 @@ final class PlannerView extends LinearLayout {
             for (TaskStore.Task task : all) {
                 boolean fromToday = todayIds.contains(task.id);
                 if ((group == 0) != fromToday || DayPlanStore.contains(existing, task.id)
-                        || (!fromToday && task.done)) continue;
+                        || task.following || (!fromToday && task.done)) continue;
                 if (!headingAdded) {
                     TextView label = PausaUi.eyebrow(getContext(), group == 0 ? "De hoy" : "De tu lista", PausaUi.MUTED);
                     label.setPadding(dp(4), dp(18), 0, dp(6));
@@ -440,12 +447,19 @@ final class PlannerView extends LinearLayout {
             franjas.addView(chips[i], p);
         }
         s.add(franjas, 6);
+        TaskSheets.Plan timing = TaskSheets.planFor(getContext(), task.id, dayOffset, original);
+        s.add(TaskSheets.timePicker(getContext(), timing, null), 8);
         Dialog dialog = s.dialog;
         sheet = dialog;
         dialog.setOnDismissListener(d -> { if (sheet == dialog) sheet = null; });
         Button save = PausaUi.action(getContext(), "Guardar", true, () -> {
             if (input.getText().toString().trim().isEmpty()) { input.setError("Escribe una tarea"); return; }
+            if (!TaskSheets.validTime(timing, input)) return;
             TaskStore.setText(getContext(), task.id, input.getText().toString());
+            if (timing.minute >= 0) {
+                destination[0] = timing.minute < 720 ? 0 : timing.minute < 1200 ? 1 : 2;
+                TaskScheduleStore.put(getContext(), timing.scheduleId, task.id, TaskScheduleStore.start(targetDate, timing.minute), timing.minutes);
+            } else if (timing.scheduleId != null) TaskScheduleStore.remove(getContext(), timing.scheduleId);
             List<List<Long>> current = DayPlanStore.read(getContext(), targetDate);
             if (!current.get(destination[0]).contains(task.id)) {
                 for (List<Long> ids : current) ids.remove(task.id);
@@ -464,6 +478,10 @@ final class PlannerView extends LinearLayout {
 
     private void removeTask(String targetDate, long id) {
         List<List<Long>> current = DayPlanStore.read(getContext(), targetDate);
+        List<TaskScheduleStore.Schedule> schedules = new ArrayList<>();
+        for (TaskScheduleStore.Schedule row : TaskScheduleStore.all(getContext())) {
+            if (!row.deleted && row.taskId == id && row.date().equals(targetDate)) schedules.add(row);
+        }
         for (int i = 0; i < 3; i++) {
             int position = current.get(i).indexOf(id);
             if (position < 0) continue;
@@ -476,6 +494,7 @@ final class PlannerView extends LinearLayout {
                     latest.get(section).add(Math.min(position, latest.get(section).size()), id);
                     DayPlanStore.save(getContext(), targetDate, latest);
                 }
+                for (TaskScheduleStore.Schedule row : schedules) TaskScheduleStore.restore(getContext(), row);
                 refresh();
             });
             break;

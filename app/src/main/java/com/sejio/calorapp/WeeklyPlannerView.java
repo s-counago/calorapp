@@ -129,10 +129,16 @@ final class WeeklyPlannerView extends PausaUi.Scroll {
             row.addView(time, new LinearLayout.LayoutParams(dp(50), -2));
             for (int half = 0; half < 2; half++) {
                 long slot = hour + half * HALF_HOUR;
-                LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, dp(46), 1);
+                LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, -2, 1);
                 if (half == 1) cp.leftMargin = dp(6);
                 if (slot < first) { row.addView(new View(getContext()), cp); continue; }
-                row.addView(cell(slot, tasks.get(assignments.get(slot)), label, hourFormat.format(new Date(slot))), cp);
+                LinearLayout block = new LinearLayout(getContext()); block.setOrientation(LinearLayout.VERTICAL); block.setMinimumHeight(dp(46));
+                List<Long> starts = new ArrayList<>();
+                for (long timeAt : assignments.keySet()) if (timeAt >= slot && timeAt < slot + HALF_HOUR) starts.add(timeAt);
+                Collections.sort(starts);
+                if (starts.isEmpty()) block.addView(cell(slot, null, label, hourFormat.format(new Date(slot))), new LinearLayout.LayoutParams(-1, dp(46)));
+                for (long timeAt : starts) block.addView(cell(timeAt, tasks.get(assignments.get(timeAt)), label, hourFormat.format(new Date(timeAt))), new LinearLayout.LayoutParams(-1, dp(60)));
+                row.addView(block, cp);
             }
             LinearLayout.LayoutParams rp = full();
             rp.bottomMargin = dp(6);
@@ -141,7 +147,7 @@ final class WeeklyPlannerView extends PausaUi.Scroll {
     }
 
     private View cell(long slot, TaskStore.Task task, String dayLabel, String hour) {
-        TextView cell = PausaUi.text(getContext(), task == null ? hour.substring(2) : task.text, task == null ? 12 : 13,
+        TextView cell = PausaUi.text(getContext(), task == null ? hour.substring(2) : hour + " · " + task.text, task == null ? 12 : 13,
                 task == null ? 0xFFA9A69C : PausaUi.INK, task != null);
         cell.setGravity(Gravity.CENTER_VERTICAL);
         cell.setPadding(dp(12), 0, dp(8), 0);
@@ -177,6 +183,9 @@ final class WeeklyPlannerView extends PausaUi.Scroll {
         if (slot < PlannerStore.currentSlotStart()) { refresh(); return; }
         PausaUi.Sheet s = new PausaUi.Sheet(getContext(), title).tall();
         if (assigned != null) s.subtitle("Ahora: " + assigned.text);
+        if (assigned != null) s.add(PausaUi.quiet(getContext(), "Editar hora y duración", PausaUi.GREEN, () -> {
+            s.dismiss(); editTime(slot, assigned);
+        }), 8);
         Dialog dialog = s.dialog;
         sheet = dialog;
         dialog.setOnDismissListener(d -> { if (sheet == dialog) sheet = null; });
@@ -211,7 +220,7 @@ final class WeeklyPlannerView extends PausaUi.Scroll {
         list.setOrientation(LinearLayout.VERTICAL);
         int pending = 0;
         for (TaskStore.Task task : TaskStore.getAll(getContext())) {
-            if (task.done) continue;
+            if (task.done || task.following) continue;
             pending++;
             boolean current = assigned != null && assigned.id == task.id;
             TextView choice = PausaUi.text(getContext(), task.text, 16, current ? PausaUi.GREEN : PausaUi.INK, current);
@@ -236,16 +245,41 @@ final class WeeklyPlannerView extends PausaUi.Scroll {
         }
         listScroll.addView(list);
         s.body.addView(listScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        TaskScheduleStore.Schedule selectedSchedule = null;
+        if (assigned != null) for (TaskScheduleStore.Schedule row : TaskScheduleStore.all(getContext())) {
+            if (!row.deleted && row.start == slot && row.taskId == assigned.id) selectedSchedule = row;
+        }
+        TaskScheduleStore.Schedule savedSchedule = selectedSchedule;
         s.footer(assigned == null ? null : PausaUi.quiet(getContext(), "Vaciar bloque", PausaUi.TERRACOTTA, () -> {
             PlannerStore.clear(getContext(), slot);
             dialog.dismiss();
             refresh();
             PausaUi.snack(getContext(), "Bloque vacío", "Deshacer", () -> {
-                if (slot >= PlannerStore.currentSlotStart()) PlannerStore.assign(getContext(), slot, assigned.id);
+                if (slot >= PlannerStore.currentSlotStart() && savedSchedule != null) TaskScheduleStore.restore(getContext(), savedSchedule);
                 refresh();
             });
         }), PausaUi.quiet(getContext(), "Cerrar", PausaUi.GREEN, dialog::dismiss));
         s.show();
+    }
+
+    private void editTime(long slot, TaskStore.Task task) {
+        TaskScheduleStore.Schedule selected = null;
+        for (TaskScheduleStore.Schedule row : TaskScheduleStore.all(getContext())) if (!row.deleted && row.start == slot && row.taskId == task.id) selected = row;
+        if (selected == null) return;
+        TaskScheduleStore.Schedule original = selected;
+        TaskSheets.Plan plan = new TaskSheets.Plan(Ledger.parseIso(original.date()) - Ledger.parseIso(DayPlanStore.day(0)), 0);
+        plan.minute = original.minute(); plan.minutes = original.minutes;
+        PausaUi.Sheet editor = new PausaUi.Sheet(getContext(), task.text);
+        editor.add(TaskSheets.timePicker(getContext(), plan, null), 12);
+        editor.footer(null, PausaUi.action(getContext(), "Guardar", true, () -> {
+            if (plan.minute < 0) TaskScheduleStore.remove(getContext(), original.id);
+            else {
+                try { TaskScheduleStore.put(getContext(), original.id, task.id, TaskScheduleStore.start(original.date(), plan.minute), plan.minutes); }
+                catch (IllegalArgumentException invalid) { PausaUi.snack(getContext(), "Esa hora no existe por el cambio de horario", null, null); return; }
+            }
+            editor.dismiss(); refresh();
+        }));
+        editor.show();
     }
 
     @Override protected void onDetachedFromWindow() {

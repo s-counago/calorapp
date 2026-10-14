@@ -76,6 +76,7 @@ public class MainActivity extends Activity implements TodayView.Host {
 
     @Override protected void onResume() {
         super.onResume(); TaskResetScheduler.scheduleNext(this); syncNotificationState();
+        CalendarSync.resume(this);
         if (counterView != null) counterView.refresh();
         if (taskListView != null) taskListView.refresh();
         if (habitListView != null) habitListView.refresh();
@@ -371,6 +372,9 @@ public class MainActivity extends Activity implements TodayView.Host {
         notificationRow.addView(notificationSwitch);
         notificationRow.setOnClickListener(v -> notificationSwitch.toggle());
         sheet.add(notificationRow, 8);
+        sheet.add(counterView.settingRow("Google Calendar", CalendarSync.status(this), () -> {
+            sheet.dismiss(); startActivity(new android.content.Intent(this, CalendarConnectionActivity.class));
+        }), 8);
         sheet.add(counterView.settingRow("Límite de calorías", PausaUi.number(CalorieStore.getCalorieLimit(this)) + " kcal",
                 () -> { sheet.dismiss(); counterView.editCalorieLimit(); }), 8);
         sheet.add(counterView.settingRow("Objetivo de proteína", CalorieStore.getProteinGoal(this) + " g",

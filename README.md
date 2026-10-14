@@ -205,6 +205,64 @@ de semanas y el gráfico ampliado. Se ejecuta del mismo modo usando su nombre co
 `uiTestRunner` y como ejecutor de `am instrument`. Ambas pruebas sustituyen los hábitos
 del emulador por datos de prueba: no ejecutarlas en el teléfono personal.
 
+## Google Calendar y horarios
+
+En Ajustes → Google Calendar se conecta una cuenta y se solicitan permisos al usar la integración.
+El proyecto `pausa-calendar-sc00` tiene Calendar API, consentimiento en pruebas y cliente Android para
+`com.sejio.calorapp`, certificado SHA-1 `32:08:9C:FD:B5:51:20:0C:BA:3B:99:92:3E:BD:A3:55:CA:D0:D9:95`.
+Otra firma o variante necesita su propio cliente Android. No se incluye un secreto OAuth en la APK.
+Las APIs usadas siguen la [autorización de Android](https://developer.android.com/identity/authorization).
+
+Las tareas guardadas con día, hora y duración crean o actualizan eventos en el calendario secundario Pausa.
+Los permisos son `calendar.app.created` y `calendar.calendarlist.readonly`; el segundo permite recuperar
+el calendario si se pierde la respuesta de su creación. Las tareas sin fecha/hora y los seguimientos no
+generan eventos. Quitar el horario o eliminar la tarea elimina su evento; completar una tarea lo conserva.
+La sincronización es de Pausa hacia Google, con cola local y reintentos cuando vuelve la red.
+Los bloques heredados conservan su horario, pero solo se exportan al volver a guardarlos explícitamente.
+Desconectar detiene la sincronización y conserva los eventos existentes.
+
+`FeedbackSmokeTest` comprueba persistencia, horarios, estados y crédito con datos sintéticos.
+Solo debe ejecutarse en un emulador desechable: reemplaza las preferencias de tareas y presupuesto.
+La prueba no valida una sesión real de Google ni una sesión bancaria.
+
+En 6.8.1 se añade `ACCESS_NETWORK_STATE`, requerido por JobScheduler para la cola con red.
+Se recupera la cola al abrir Pausa y un error al programarla deja un estado visible sin cerrar la app.
+`CalendarSchedulingSmokeTest` reproduce la conexión activada, la recuperación de la cola y el guardado
+de una tarea con hora. Ejecutarlo solo en un emulador desechable: limpia las preferencias de Calendar.
+El 12 de octubre de 2026 se verificó en el Pixel la conexión real y el estado «Sincronizado con el
+calendario Pausa». No había horarios elegibles guardados tras el cierre, por lo que la creación real
+de un evento desde una tarea nueva queda por comprobar al guardar su hora.
+
+## Diagnóstico de precios y movimientos
+
+En Dinero → Cartera, pulsar Actualizar valoración y después Diagnóstico de precios → Copiar diagnóstico.
+El informe registra etapas, estructura de respuestas y códigos de error; no incluye tokens, conceptos,
+instrumentos, cantidades ni precios. La fuente sigue siendo Trade Republic mediante su conexión nativa.
+El diagnóstico real identificó dos instrumentos `fund` con factor unitario que el filtro anterior
+rechazaba. En 6.8.1 se admite ese caso y se renueva la caché antigua; ambos devolvieron `VALUED` en el Pixel.
+
+Movimientos permite renombrar una transacción conservando su concepto bancario y desplegar Tarjetas de crédito.
+
+En 6.8.2, las copias de compras y devoluciones de débito en cuenta se concilian con la tarjeta
+por banco, importe con signo, fecha valor y comercio. Se reconocen tanto el prefijo del extracto
+como los tipos «OPERACIONES TARJETA DEBITO» y «OPERACIONES T.P.V.» de la web. El emparejamiento
+es uno a uno; la copia permanece visible sin contar y enlaza al movimiento de tarjeta.
+Las reglas generales de comercios no reclasifican transferencias ni movimientos ignorados;
+se mantienen las correcciones explícitas sobre un movimiento concreto.
+La previsión usa el ritmo de compras, con las devoluciones recibidas aplicadas una sola vez.
+El detalle «Cómo se calcula» separa compras, devoluciones y gasto previsto hasta el cierre.
+Verificado con 130 pruebas JVM, 18 comprobaciones de interfaz en emulador y lint.
+
+En 6.8.3, las respuestas de «Por revisar» guardan también la clasificación explícita del movimiento.
+Se reconocen las confirmaciones «Entre mis cuentas» ya recordadas sin permitir que otras reglas
+generales conviertan traspasos en ingresos o devoluciones. `BudgetUiSmokeTest -e reviewOnly true`
+comprueba la respuesta, su desaparición de pendientes, deshacer y reabrir la revisión en un emulador.
+
+Las compras del ciclo se agrupan por cobro previsto: último día del mes siguiente a la compra. La clasificación
+de crédito se puede corregir por tarjeta. La previsión no equivale a una confirmación bancaria de pago.
+Los pagos fijos admiten concepto y rango de importe, con extremos incluidos. Reasignar manualmente un pago a
+un fijo con rango actualiza su importe previsto; el rango permanece como lo configuró el usuario.
+
 ## Install Over USB
 
 1. On the phone, enable Developer options.

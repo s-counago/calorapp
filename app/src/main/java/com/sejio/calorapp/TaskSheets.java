@@ -18,16 +18,19 @@ import java.util.List;
 final class TaskSheets {
     static final String[] FRANJAS = {"Mañana", "Tarde", "Noche"};
     static final String[] FRANJA_ICONS = {"sun", "sunset", "moon"};
-    private static final String[] DAYS = {"Sin día", "Hoy", "Mañana"};
+    private static final String[] DAYS = {"Sin día", "Hoy", "Mañana", "Semana"};
 
     private TaskSheets() { }
 
     /** Where a task lives: day -1 means unplanned, 0 today, 1 tomorrow. */
     static final class Plan {
         int day, franja;
+        int minute = -1, minutes = 30;
+        String scheduleId;
         Plan(int day, int franja) { this.day = day; this.franja = franja; }
         String describe() {
-            return day < 0 ? "tu lista" : (day == 0 ? "Hoy" : "Mañana") + ", " + DayPlanStore.LABELS[franja].toLowerCase(PausaUi.SPANISH);
+            return day < 0 ? "tu lista" : (day == 0 ? "Hoy" : day == 1 ? "Mañana" : Budget.date(Ledger.parseIso(DayPlanStore.day(day))))
+                    + (minute >= 0 ? String.format(java.util.Locale.ROOT, ", %02d:%02d", minute / 60, minute % 60) : ", " + DayPlanStore.LABELS[franja].toLowerCase(PausaUi.SPANISH));
         }
     }
 
@@ -37,16 +40,27 @@ final class TaskSheets {
     }
 
     static Plan planOf(Context c, long id) {
-        for (int day = 0; day <= 1; day++) {
+        for (int day = 0; day < 7; day++) {
             int section = sectionOf(DayPlanStore.read(c, DayPlanStore.day(day)), id);
-            if (section >= 0) return new Plan(day, section);
+            if (section >= 0) return planFor(c, id, day, section);
         }
         return new Plan(-1, PausaUi.currentFranja());
     }
 
+    static Plan planFor(Context c, long id, int day, int section) {
+        Plan plan = new Plan(day, section);
+        TaskScheduleStore.Schedule schedule = TaskScheduleStore.first(c, id, DayPlanStore.day(day));
+        if (schedule != null) { plan.minute = schedule.minute(); plan.minutes = schedule.minutes; plan.scheduleId = schedule.id; }
+        return plan;
+    }
+
     /** Moves the task to the chosen day and franja, keeping its position when nothing changed. */
     static void applyPlan(Context c, long id, Plan plan) {
-        for (int day = 0; day <= 1; day++) {
+        if (plan.day >= 0 && plan.minute >= 0) {
+            plan.franja = plan.minute < 720 ? 0 : plan.minute < 1200 ? 1 : 2;
+            TaskScheduleStore.put(c, plan.scheduleId, id, TaskScheduleStore.start(DayPlanStore.day(plan.day), plan.minute), plan.minutes);
+        } else if (plan.scheduleId != null) TaskScheduleStore.remove(c, plan.scheduleId);
+        for (int day = 0; day < 7; day++) {
             String key = DayPlanStore.day(day);
             List<List<Long>> board = DayPlanStore.read(c, key);
             int current = sectionOf(board, id);
@@ -68,10 +82,10 @@ final class TaskSheets {
         LinearLayout franjaBlock = new LinearLayout(c);
         franjaBlock.setOrientation(LinearLayout.VERTICAL);
         LinearLayout franjas = new LinearLayout(c);
-        TextView[] dayChips = new TextView[3];
+        TextView[] dayChips = new TextView[4];
         TextView[] franjaChips = new TextView[3];
         Runnable render = () -> {
-            for (int i = 0; i < 3; i++) PausaUi.setChip(dayChips[i], plan.day == i - 1);
+            for (int i = 0; i < 4; i++) PausaUi.setChip(dayChips[i], i == 3 ? plan.day > 1 : plan.day == i - 1);
             for (int i = 0; i < 3; i++) {
                 boolean on = plan.franja == i;
                 PausaUi.setChip(franjaChips[i], on);
@@ -84,9 +98,21 @@ final class TaskSheets {
                 PausaUi.rise(franjaBlock, 0);
             } else if (!show) franjaBlock.setVisibility(View.GONE);
         };
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             final int day = i - 1;
-            dayChips[i] = PausaUi.chip(c, DAYS[i], false, () -> { plan.day = day; render.run(); if (changed != null) changed.run(); });
+            dayChips[i] = PausaUi.chip(c, DAYS[i], false, () -> {
+                if (day == 2) {
+                    java.util.Calendar now = java.util.Calendar.getInstance();
+                    android.app.DatePickerDialog picker = new android.app.DatePickerDialog(c, (view, year, month, date) -> {
+                        plan.day = Ledger.epochDay(year, month + 1, date) - Ledger.parseIso(DayPlanStore.day(0));
+                        dayChips[3].setText(Budget.date(Ledger.parseIso(DayPlanStore.day(plan.day))));
+                        render.run(); if (changed != null) changed.run();
+                    }, now.get(java.util.Calendar.YEAR), now.get(java.util.Calendar.MONTH), now.get(java.util.Calendar.DAY_OF_MONTH));
+                    picker.getDatePicker().setMinDate(TaskScheduleStore.start(DayPlanStore.day(0), 0));
+                    picker.getDatePicker().setMaxDate(TaskScheduleStore.start(DayPlanStore.day(6), 1439));
+                    picker.show();
+                } else { plan.day = day; render.run(); if (changed != null) changed.run(); }
+            });
             dayChips[i].setContentDescription("Planificar: " + DAYS[i]);
             LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -2, 1);
             if (i > 0) p.leftMargin = PausaUi.dp(c, 8);
@@ -105,10 +131,52 @@ final class TaskSheets {
             franjas.addView(franjaChips[i], p);
         }
         franjaBlock.addView(franjas, spaced(c, 6));
+        franjaBlock.addView(timePicker(c, plan, () -> { render.run(); if (changed != null) changed.run(); }), spaced(c, 0));
         column.addView(franjaBlock, spaced(c, 0));
         franjaBlock.setVisibility(plan.day >= 0 ? View.VISIBLE : View.GONE);
         render.run();
         return column;
+    }
+
+    static LinearLayout timePicker(Context c, Plan plan, Runnable changed) {
+        LinearLayout column = new LinearLayout(c); column.setOrientation(LinearLayout.VERTICAL);
+        TextView time = PausaUi.quiet(c, "", PausaUi.GREEN, null);
+        TextView clear = PausaUi.quiet(c, "Quitar hora", PausaUi.MUTED, null);
+        TextView duration = PausaUi.quiet(c, "", PausaUi.GREEN, null);
+        Runnable render = () -> {
+            time.setText(plan.minute < 0 ? "Añadir hora · opcional" : String.format(java.util.Locale.ROOT, "Hora · %02d:%02d", plan.minute / 60, plan.minute % 60));
+            clear.setVisibility(plan.minute >= 0 ? View.VISIBLE : View.GONE);
+            duration.setVisibility(plan.minute >= 0 ? View.VISIBLE : View.GONE);
+            duration.setText("Duración · " + plan.minutes + " min");
+            if (changed != null) changed.run();
+        };
+        time.setOnClickListener(v -> new android.app.TimePickerDialog(c, (picker, hour, minute) -> {
+            plan.minute = hour * 60 + minute; plan.franja = hour < 12 ? 0 : hour < 20 ? 1 : 2; render.run();
+        }, plan.minute < 0 ? 9 : plan.minute / 60, plan.minute < 0 ? 0 : plan.minute % 60, true).show());
+        clear.setOnClickListener(v -> { plan.minute = -1; render.run(); });
+        duration.setOnClickListener(v -> {
+            PausaUi.Sheet sheet = new PausaUi.Sheet(c, "Duración de la tarea");
+            EditText input = new EditText(c); PausaUi.input(input);
+            input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER); input.setText(String.valueOf(plan.minutes));
+            input.setContentDescription("Duración en minutos"); sheet.add(input, 12);
+            sheet.footer(null, PausaUi.action(c, "Guardar", true, () -> {
+                try {
+                    int minutes = Integer.parseInt(input.getText().toString().trim());
+                    if (minutes < 5 || minutes > 1440) throw new IllegalArgumentException();
+                    plan.minutes = minutes; sheet.dismiss(); render.run();
+                } catch (Exception invalid) { input.setError("Entre 5 y 1440 minutos"); }
+            }));
+            sheet.show();
+        });
+        column.addView(time); column.addView(duration); column.addView(clear);
+        render.run();
+        return column;
+    }
+
+    static boolean validTime(Plan plan, EditText input) {
+        if (plan.day < 0 || plan.minute < 0) return true;
+        try { TaskScheduleStore.start(DayPlanStore.day(plan.day), plan.minute); return true; }
+        catch (IllegalArgumentException invalid) { input.setError("Esa hora no existe por el cambio de horario. Elige otra."); return false; }
     }
 
     /** Continuous capture: the sheet stays open so several tasks can be added in a row. */
@@ -128,6 +196,7 @@ final class TaskSheets {
         Runnable add = () -> {
             String value = input.getText().toString().trim();
             if (value.isEmpty()) { input.setError("Escribe una tarea"); return; }
+            if (!validTime(plan, input)) return;
             long id = TaskStore.add(c, value);
             if (plan.day >= 0) applyPlan(c, id, plan);
             input.setText("");
@@ -163,9 +232,13 @@ final class TaskSheets {
         sheet.add(input, 18);
         Plan plan = planOf(c, task.id);
         sheet.add(planPicker(c, plan, null), 4);
+        if (!task.done) sheet.add(PausaUi.quiet(c, "Pasar a seguimiento", PausaUi.GREEN, () -> {
+            sheet.dismiss(); FollowupSheets.edit(c, task, changed == null ? () -> {} : changed);
+        }), 8);
         Runnable save = () -> {
             String value = input.getText().toString().trim();
             if (value.isEmpty()) { input.setError("Escribe una tarea"); return; }
+            if (!validTime(plan, input)) return;
             TaskStore.setText(c, task.id, value);
             applyPlan(c, task.id, plan);
             sheet.dismiss();

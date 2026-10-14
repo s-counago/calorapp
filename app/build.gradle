@@ -10,8 +10,8 @@ android {
         applicationId "com.sejio.calorapp"
         minSdk 23
         targetSdk 35
-        versionCode 24
-        versionName "6.7"
+        versionCode 28
+        versionName "6.8.3"
         testInstrumentationRunner project.findProperty("uiTestRunner") ?: "com.sejio.calorapp.PlannerSmokeTest"
     }
 
@@ -37,6 +37,7 @@ android {
 }
 
 dependencies {
+    implementation "com.google.android.gms:play-services-auth:21.4.0"
     implementation "androidx.webkit:webkit:1.15.0"
     implementation "com.squareup.okhttp3:okhttp:5.3.2"
     testImplementation "junit:junit:4.13.2"

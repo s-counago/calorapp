@@ -195,7 +195,10 @@ final class BankingDatabase extends SQLiteOpenHelper {
         try (Cursor cursor = db.rawQuery("SELECT id,bank,type,payload FROM products", null)) {
             while (cursor.moveToNext()) {
                 JSONObject product = new JSONObject().put("bank", cursor.getString(1)).put("type", cursor.getString(2));
-                try { product.put("label", decrypt("products", cursor.getString(0), cursor.getBlob(3)).optString("label")); }
+                try {
+                    JSONObject payload = decrypt("products", cursor.getString(0), cursor.getBlob(3));
+                    product.put("label", payload.optString("label")).put("kind", payload.optString("kind"));
+                }
                 catch (Exception ignored) { product.put("label", ""); }
                 products.put(cursor.getString(0), product);
             }
@@ -209,6 +212,7 @@ final class BankingDatabase extends SQLiteOpenHelper {
                 try { data = decrypt("entities", cursor.getString(0), cursor.getBlob(2)); }
                 catch (Exception unreadable) { continue; }
                 result.put(new JSONObject().put("id", cursor.getString(0)).put("bank", product.getString("bank"))
+                        .put("productId", cursor.getString(1)).put("productKind", product.optString("kind"))
                         .put("productType", product.getString("type")).put("productLabel", product.getString("label")).put("data", data));
             }
         }

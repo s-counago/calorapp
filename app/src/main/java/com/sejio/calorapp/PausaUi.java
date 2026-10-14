@@ -834,6 +834,8 @@ final class PausaUi {
                 case "chevron": line(c,9,5,16,12,9,19); break;
                 case "back": line(c,15,5,8,12,15,19); break;
                 case "down": line(c,5,9,12,16,19,9); break;
+                case "up": line(c,5,15,12,8,19,15); break;
+                case "clock": c.drawCircle(12,12,9,p); line(c,12,6,12,12,16,14); break;
                 case "plus": line(c,12,5,12,19); line(c,5,12,19,12); break;
                 case "minus": line(c,5,12,19,12); break;
                 case "check": line(c,4,12,9,17,20,6); break;
