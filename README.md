@@ -6,7 +6,7 @@ viajes de Renfe entre A Coruña y Santiago de Compostela.
 ## Banking local: ABANCA y Trade Republic
 
 La pestaña `Banca` abre cada banco en un perfil WebView independiente y persistente
-en el teléfono. No necesita Sure, un backend ni configurar credenciales en archivos.
+en el teléfono. No necesita un backend ni configurar credenciales en archivos.
 Introduce tus credenciales y el segundo factor directamente en la web del banco.
 Pausa reutiliza el perfil mientras el banco acepte la sesión; no garantiza una
 duración ni realiza reintentos automáticos de acceso.

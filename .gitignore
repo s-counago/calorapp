@@ -31,6 +31,3 @@ tools/renfe-seat-monitor.pid
 *.jks
 *.keystore
 *.log
-sure-local/cloudflare-state.json
-sure-local/https-state.json
-sure-local/https/*.key

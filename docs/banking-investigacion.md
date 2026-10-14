@@ -4,6 +4,9 @@
 > propias de ABANCA y Trade Republic, sin Sure. La base Android y sus límites se
 > describen en [banking-local.md](banking-local.md). El resto de este documento
 > conserva la investigación histórica, no la recomendación vigente.
+>
+> Actualización 14/10/2026: los lectores de ABANCA y Trade Republic funcionan con las
+> cuentas reales y Sure se ha retirado del repositorio.
 
 Fecha de consulta inicial: 18 de septiembre de 2026. Revisión de alojamiento: 21 de septiembre de 2026.
 

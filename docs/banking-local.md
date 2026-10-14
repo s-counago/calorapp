@@ -16,7 +16,7 @@ El usuario elige gestionar sus propias sesiones y consultar datos cuando lo nece
 sin depender de Sure ni de sus integraciones experimentales. La aplicación es Android
 nativa en Java. La primera implementación ejecuta un navegador en el teléfono, con un
 perfil persistente por banco, y un lector JavaScript pasivo bajo demanda. No necesita
-servidor ni un PC encendido. La carpeta histórica `sure-local` no se usa desde este módulo.
+servidor ni un PC encendido.
 
 La base está implementada; **no se han probado credenciales ni sesiones reales**.
 La compatibilidad de ABANCA y Trade Republic con Android WebView sigue pendiente.
