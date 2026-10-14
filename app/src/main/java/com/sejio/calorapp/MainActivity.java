@@ -63,6 +63,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         showSection(state == null ? 0 : state.getInt("section", 0));
         TaskResetScheduler.scheduleNext(this);
         syncNotificationState();
+        PausaSync.schedulePeriodic(this);
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
@@ -77,6 +78,30 @@ public class MainActivity extends Activity implements TodayView.Host {
     @Override protected void onResume() {
         super.onResume(); TaskResetScheduler.scheduleNext(this); syncNotificationState();
         CalendarSync.resume(this);
+        PausaSync.requestSoon(this);
+        refreshAll();
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        android.content.IntentFilter filter = new android.content.IntentFilter(PausaSync.ACTION_CHANGED);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(dataChanged, filter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(dataChanged, filter);
+    }
+
+    @Override protected void onStop() {
+        unregisterReceiver(dataChanged);
+        super.onStop();
+    }
+
+    /** Edits that arrive from the web or an agent show up without reopening the app. */
+    private final android.content.BroadcastReceiver dataChanged = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context context, android.content.Intent intent) {
+            if (intent.getIntExtra("applied", 0) > 0) refreshAll();
+        }
+    };
+
+    private void refreshAll() {
         if (counterView != null) counterView.refresh();
         if (taskListView != null) taskListView.refresh();
         if (habitListView != null) habitListView.refresh();
@@ -372,6 +397,9 @@ public class MainActivity extends Activity implements TodayView.Host {
         notificationRow.addView(notificationSwitch);
         notificationRow.setOnClickListener(v -> notificationSwitch.toggle());
         sheet.add(notificationRow, 8);
+        sheet.add(counterView.settingRow("Nube", PausaSync.status(this), () -> {
+            sheet.dismiss(); startActivity(new android.content.Intent(this, CloudActivity.class));
+        }), 8);
         sheet.add(counterView.settingRow("Google Calendar", CalendarSync.status(this), () -> {
             sheet.dismiss(); startActivity(new android.content.Intent(this, CalendarConnectionActivity.class));
         }), 8);
@@ -388,6 +416,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         signature.setLineSpacing(0, 1.2f);
         signature.setCompoundDrawables(null, new PausaUi.Symbol(this, "sunrise", PausaUi.SUN, 22), null, null);
         signature.setCompoundDrawablePadding(dp(8));
+        // Hidden door to the diagnostics screen.
+        signature.setOnLongClickListener(v -> { sheet.dismiss(); startActivity(new android.content.Intent(this, DiagnosticsActivity.class)); return true; });
         sheet.add(signature, 6);
         sheet.dialog.setOnDismissListener(d -> notificationSwitch = null);
         sheet.show();
