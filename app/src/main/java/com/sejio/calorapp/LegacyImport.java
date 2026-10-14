@@ -47,6 +47,11 @@ final class LegacyImport {
         done = true;
     }
 
+    /** For instrumented tests that write old preferences and import them again. */
+    static void forgetForTests() {
+        done = false;
+    }
+
     private static void run(Context context, PausaDb pausa) {
         long now = System.currentTimeMillis();
         int tasks = 0, planned = 0, habits = 0, checks = 0;

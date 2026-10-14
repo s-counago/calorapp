@@ -129,10 +129,10 @@ final class CloudAuth {
         }
     }
 
-    private static void store(Context context, String token, String deviceId, String account) throws Exception {
+    static void store(Context context, String token, String deviceId, String account) throws Exception {
         byte[] encrypted = BankingCrypto.encrypt(key(true), ALIAS, new JSONObject().put("token", token));
         prefs(context).edit().putString("token", Base64.encodeToString(encrypted, Base64.NO_WRAP))
-                .putString("device_id", deviceId).putString("account", account).putBoolean("auth_error", false).apply();
+                .putString("device_id", deviceId).putString("account", account).putBoolean("auth_error", false).commit();
     }
 
     /** Called when the backend answers 401: keep local data, stop syncing until the user signs in again. */

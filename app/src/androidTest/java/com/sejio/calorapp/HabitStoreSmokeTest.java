@@ -23,7 +23,7 @@ public final class HabitStoreSmokeTest extends Instrumentation {
         Bundle result = new Bundle();
         try {
             Context context = getTargetContext();
-            context.getSharedPreferences("weekly_habits", 0).edit().clear().commit();
+            PausaTestData.reset(context);
             String currentWeek = HabitStore.weekStart(HabitStore.today());
             String previousWeek = HabitStore.addDays(currentWeek, -7);
 
@@ -108,7 +108,7 @@ public final class HabitStoreSmokeTest extends Instrumentation {
             }
 
             // One completed week worth five, followed by two missed weeks: 5 -> 4 -> 3.
-            context.getSharedPreferences("weekly_habits", 0).edit().clear().commit();
+            PausaTestData.reset(context);
             String earnedWeek = HabitStore.addDays(currentWeek, -21);
             String earnedDay = HabitStore.addDays(earnedWeek, 1);
             JSONObject habit = new JSONObject();
@@ -122,6 +122,7 @@ public final class HabitStoreSmokeTest extends Instrumentation {
             habit.put("baseAwardDays", new JSONObject().put(earnedWeek, earnedDay));
             context.getSharedPreferences("weekly_habits", 0).edit()
                     .putString("habits_v1", new JSONArray().put(habit).toString()).commit();
+            PausaTestData.reimport(context);
             List<HabitStore.Habit> decayed = HabitStore.getAll(context);
             check(HabitStore.totalPoints(decayed.get(0)) == 3,
                     "two missed weeks each decay the then-current score by fifteen percent");

@@ -59,7 +59,8 @@ public final class DiagnosticsActivity extends Activity {
         line(state, "Cursor", db.state("cursor", "0"));
         line(state, "Último éxito", time(db.state("last_success_at", "0")));
         line(state, "Último error", db.state("last_error", "").isEmpty() ? "—" : time(db.state("last_error_at", "0")) + "\n  " + db.state("last_error", ""));
-        line(state, "Importado", time(db.state("imported", "0")));
+        String imported = db.state("imported", "0");
+        line(state, "Importado", imported.length() < 13 ? (imported.equals("0") ? "no" : "sí") : time(imported));
         StringBuilder pending = new StringBuilder();
         for (Map<String, Object> row : db.rows("SELECT tbl, COUNT(*) AS n FROM outbox GROUP BY tbl ORDER BY tbl")) {
             pending.append(pending.length() == 0 ? "" : ", ").append(row.get("tbl")).append(' ').append(row.get("n"));
@@ -83,11 +84,13 @@ public final class DiagnosticsActivity extends Activity {
         }));
         content.addView(PausaUi.quiet(this, "Actualizar", PausaUi.GREEN, this::render));
 
-        TextView title = PausaUi.text(this, "Log local (" + PausaLog.file(this).getAbsolutePath() + ")", 12, PausaUi.MUTED, false);
+        TextView title = PausaUi.text(this, "Log local, lo más reciente arriba (" + PausaLog.file(this).getAbsolutePath() + ")", 12, PausaUi.MUTED, false);
         title.setPadding(0, PausaUi.dp(this, 16), 0, PausaUi.dp(this, 8));
         content.addView(title);
-        String tail = PausaLog.tail(this, 12000);
-        content.addView(block(tail.isEmpty() ? "Vacío." : tail));
+        String[] lines = PausaLog.tail(this, 12000).split("\n");
+        StringBuilder newestFirst = new StringBuilder();
+        for (int i = lines.length - 1; i >= 0; i--) if (!lines[i].isEmpty()) newestFirst.append(lines[i]).append('\n');
+        content.addView(block(newestFirst.length() == 0 ? "Vacío." : newestFirst.toString()));
     }
 
     private TextView block(String text) {

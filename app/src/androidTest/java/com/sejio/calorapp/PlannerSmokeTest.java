@@ -32,9 +32,13 @@ public final class PlannerSmokeTest extends Instrumentation {
             context.getSharedPreferences("daily_tasks", 0).edit().clear().commit();
             context.getSharedPreferences("day_boards", 0).edit().clear().commit();
             context.getSharedPreferences("short_term_planner", 0).edit().clear().commit();
-            first = TaskStore.add(context, "Preparar el informe");
-            second = TaskStore.add(context, "Comprar para la cena");
-            third = TaskStore.add(context, "Preparar comida");
+            PausaTestData.reset(context);
+            // Old SharedPreferences data, imported once into PausaDb.
+            first = System.currentTimeMillis() - 3000;
+            second = first + 1;
+            third = first + 2;
+            context.getSharedPreferences("daily_tasks", 0).edit().putString("tasks", "[{\"id\":" + first + ",\"text\":\"Preparar el informe\"},"
+                    + "{\"id\":" + second + ",\"text\":\"Comprar para la cena\"},{\"id\":" + third + ",\"text\":\"Preparar comida\"}]").commit();
             Calendar time = Calendar.getInstance();
             time.add(Calendar.DAY_OF_YEAR, 1);
             time.set(Calendar.HOUR_OF_DAY, 9);
@@ -44,6 +48,7 @@ public final class PlannerSmokeTest extends Instrumentation {
             long late = time.getTimeInMillis();
             context.getSharedPreferences("short_term_planner", 0).edit()
                     .putString("assignments", "{\"" + early + "\":" + first + ",\"" + late + "\":" + second + "}").commit();
+            PausaTestData.reimport(context);
             List<List<Long>> migrated = DayPlanStore.read(context, DayPlanStore.day(1));
             check(migrated.get(0).contains(first) && migrated.get(1).contains(second), "legacy migration");
             migrated.get(2).add(third);
@@ -176,7 +181,8 @@ public final class PlannerSmokeTest extends Instrumentation {
         now.add(Calendar.DAY_OF_YEAR, 2);
         today.refresh();
         check(((List<?>) field(today, "plan")).equals(DayPlanStore.empty()), "skipped days do not carry old tasks forward");
-        context.getSharedPreferences("day_boards", 0).edit().remove("2031-01-01").apply();
+        List<List<Long>> cleared = DayPlanStore.empty();
+        DayPlanStore.save(context, "2031-01-01", cleared);
     }
     private void check(boolean value, String label) {
         if (!value) throw new AssertionError(label);

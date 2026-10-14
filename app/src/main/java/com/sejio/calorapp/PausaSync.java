@@ -70,17 +70,17 @@ final class PausaSync {
 
     /** What the diagnostics screen and the cloud screen show. */
     static String status(Context context) {
-        if (!CloudAuth.prefs(context).contains("token")) return "Sin conectar · todo se guarda en el teléfono";
-        if (CloudAuth.authError(context)) return "Sesión rechazada · vuelve a conectar";
+        if (!CloudAuth.prefs(context).contains("token")) return "Sin conectar";
+        if (CloudAuth.authError(context)) return "Vuelve a conectar";
         PausaDb db = PausaDb.get(context);
         int pending = db.count("SELECT COUNT(*) FROM outbox");
         String error = db.state("last_error", "");
         long last = Long.parseLong(db.state("last_success_at", "0"));
         String when = last == 0 ? "aún no sincronizado" : "sincronizado " + ago(last);
         if (!error.isEmpty() && Long.parseLong(db.state("last_error_at", "0")) > last) {
-            return (pending > 0 ? pending + " cambios pendientes · " : "") + "sin conexión con el servidor";
+            return (pending > 0 ? pending + " pendientes · " : "") + "sin conexión";
         }
-        return pending > 0 ? pending + " cambios pendientes · " + when : "Al día · " + when;
+        return pending > 0 ? pending + " pendientes · " + when : "Al día · " + when;
     }
 
     static String ago(long at) {
@@ -98,11 +98,21 @@ final class PausaSync {
         }
 
         @NonNull @Override public Result doWork() {
-            Context context = getApplicationContext();
+            switch (round(getApplicationContext(), getRunAttemptCount())) {
+                case RETRY: return Result.retry();
+                case FAILURE: return Result.failure();
+                default: return Result.success();
+            }
+        }
+
+        enum Outcome { SUCCESS, RETRY, FAILURE }
+
+        /** One round outside WorkManager too (tests, diagnostics). */
+        static synchronized Outcome round(Context context, int attempt) {
             PausaLog.init(context);
             LegacyImport.runOnce(context);
             String token = CloudAuth.token(context);
-            if (token == null || CloudAuth.authError(context)) return Result.success();
+            if (token == null || CloudAuth.authError(context)) return Outcome.SUCCESS;
             PausaDb db = PausaDb.get(context);
             String version = BuildConfig.VERSION_NAME;
             SyncEngine engine = new SyncEngine(HttpUrl.get(BuildConfig.PAUSA_API_URL), token, version,
@@ -114,23 +124,23 @@ final class PausaSync {
                 db.setState("last_error", "");
                 PausaLog.event("info", "sync", "Sync finished", CloudAuth.json("pushed", result.pushed, "stale", result.stale,
                         "pulled", result.pulled, "applied", result.applied, "cursor", result.cursor, "ms", System.currentTimeMillis() - started,
-                        "attempt", getRunAttemptCount()));
+                        "attempt", attempt));
                 changed(context, result.applied);
                 uploadLogs(db, engine);
-                return Result.success();
+                return Outcome.SUCCESS;
             } catch (SyncEngine.AuthFailure rejected) {
                 CloudAuth.markRejected(context, rejected.code);
                 recordError(db, "auth:" + rejected.code);
                 PausaLog.w("sync", "Backend rejected the device token: " + rejected.code);
                 changed(context, 0);
-                return Result.failure();
+                return Outcome.FAILURE;
             } catch (Exception failure) {
                 recordError(db, failure.getClass().getSimpleName() + ": " + failure.getMessage());
-                PausaLog.w("sync", "Sync failed (attempt " + getRunAttemptCount() + ")", failure);
+                PausaLog.w("sync", "Sync failed (attempt " + attempt + ")", failure);
                 changed(context, 0);
                 // A 4xx other than 401 means this app sent something the server refuses: retrying will not help.
-                if (failure instanceof SyncEngine.HttpFailure && ((SyncEngine.HttpFailure) failure).status < 500) return Result.failure();
-                return Result.retry();
+                if (failure instanceof SyncEngine.HttpFailure && ((SyncEngine.HttpFailure) failure).status < 500) return Outcome.FAILURE;
+                return Outcome.RETRY;
             }
         }
 

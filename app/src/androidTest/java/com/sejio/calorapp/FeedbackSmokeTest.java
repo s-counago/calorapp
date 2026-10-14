@@ -30,6 +30,7 @@ public final class FeedbackSmokeTest extends Instrumentation {
         try {
             Context c = getTargetContext();
             for (String prefs : new String[]{"google_calendar", "daily_tasks", "day_boards", "short_term_planner", "task_schedule"}) c.getSharedPreferences(prefs, 0).edit().clear().commit();
+            PausaTestData.reset(c);
             long task = TaskStore.add(c, "Preparar la propuesta");
             long stack = TaskStore.add(c, "Leer el libro");
             check(TaskScheduleStore.all(c).isEmpty(), "backlog has no calendar events");

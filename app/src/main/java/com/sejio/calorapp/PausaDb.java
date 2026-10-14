@@ -232,6 +232,8 @@ final class PausaDb extends SQLiteOpenHelper {
                 for (SyncEngine.Change change : changes) {
                     Map<String, Object> local = rowIn(db, change.table, change.id);
                     if (!SyncSchema.remoteWins(local == null ? null : (Long) local.get("updated_at"), change.updatedAt)) continue;
+                    // Our own push coming back: same version, nothing to apply.
+                    if (local != null && change.updatedAt == (Long) local.get("updated_at") && (change.deleted ? 1L : 0L) == (Long) local.get("deleted")) continue;
                     Map<String, Object> merged = SyncSchema.fromWire(change.table, change.data, local);
                     ContentValues values = new ContentValues();
                     for (Map.Entry<String, Object> field : merged.entrySet()) putValue(values, field.getKey(), field.getValue());
