@@ -35,11 +35,13 @@ public final class BudgetUiSmokeTest extends Instrumentation {
     private String today = "2026-10-05";
     /** Only with the emulator offline: opens the ABANCA shell without reaching the bank. */
     private boolean offlineBrowser;
+    private boolean reviewOnly;
 
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         if (arguments != null && arguments.getString("today") != null) today = arguments.getString("today");
         offlineBrowser = arguments != null && "true".equals(arguments.getString("offlineBrowser"));
+        reviewOnly = arguments != null && "true".equals(arguments.getString("reviewOnly"));
         start();
     }
 
@@ -72,11 +74,32 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             check(inbox != null, "review inbox is offered");
             tapNode(inbox);
             capture("budget-09-por-revisar.png");
+            Budget.Review firstReview = Budget.review(Budget.snapshot(Ledger.fromDatabase(rows, java.util.TimeZone.getDefault()),
+                    BudgetStore.load(context), Ledger.parseIso(today))).get(0);
+            check(firstReview.type == Budget.REVIEW_INFLOW, "first review is an unexplained inflow");
             tap("Entre mis cuentas", false);
             SystemClock.sleep(700);
             check(BudgetStore.load(context).merchant.containsValue("transfer"), "inbox answers are remembered");
+            check("transfer".equals(BudgetStore.load(context).txn.get(firstReview.entry.txn.id)), "inbox answer classifies the selected movement");
+            check(!pending(rows, context, firstReview.id()), "answered movement disappears from review");
+            tap("Deshacer", false);
+            check(pending(rows, context, firstReview.id()), "undo returns the movement to review");
+            tap("Entre mis cuentas", false);
+            check(!pending(rows, context, firstReview.id()), "answer still applies after undo");
             capture("budget-10-por-revisar-respondido.png");
             pressBack();
+            inbox = findContains("Por revisar:");
+            check(inbox != null, "other questions remain available");
+            tapNode(inbox);
+            check(!pending(rows, context, firstReview.id()), "reopening review preserves the answer");
+            pressBack();
+            if (reviewOnly) {
+                BudgetStore.reset(context);
+                runOnMainSync(activity::finish);
+                result.putString("stream", "PASS: " + checks + " review UI checks\n");
+                finish(Activity.RESULT_OK, result);
+                return;
+            }
             unsecure();
             scrollBy(900); capture("budget-02-fijo.png");
             scrollBy(900); capture("budget-03-fijo-2.png");
@@ -118,15 +141,15 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             tap("Tabaco", false);
             SystemClock.sleep(500);
             Budget.Settings settings = BudgetStore.load(context);
-            check(settings.merchant.containsValue("cat:tabaco"), "teaching a merchant is saved");
+            check(settings.txn.containsValue("cat:tabaco"), "individual classification is saved");
             tap("Deshacer", false);
-            check(!BudgetStore.load(context).merchant.containsValue("cat:tabaco"), "undo restores the previous settings");
+            check(!BudgetStore.load(context).txn.containsValue("cat:tabaco"), "undo restores the previous settings");
 
             coffee = findContains("A Crucena,");
             if (coffee == null) coffee = findContains("Cafés y bares");
             tapNode(coffee);
-            AccessibilityNodeInfo page = findContains("Ficha de «");
-            check(page != null, "classify links to the merchant page");
+            AccessibilityNodeInfo page = findContains("Editar nombre de este movimiento");
+            check(page != null, "classify links to individual movement editing");
             tapNode(page);
             capture("budget-12-ficha.png");
             pressBack();
@@ -376,6 +399,13 @@ public final class BudgetUiSmokeTest extends Instrumentation {
     private void check(boolean value, String label) {
         if (!value) throw new AssertionError(label);
         checks++;
+    }
+
+    private boolean pending(JSONArray rows, Context context, String id) {
+        Budget.Snapshot snapshot = Budget.snapshot(Ledger.fromDatabase(rows, java.util.TimeZone.getDefault()),
+                BudgetStore.load(context), Ledger.parseIso(today));
+        for (Budget.Review item : Budget.review(snapshot)) if (item.id().equals(id)) return true;
+        return false;
     }
 
     private void capture(String name) throws Exception {

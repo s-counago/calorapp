@@ -33,6 +33,8 @@ final class TaskListView extends LinearLayout {
     private final ImageButton sendButton;
     private final LinearLayout taskRows;
     private final TextView summary;
+    private final LinearLayout followups;
+    private boolean followupsOpen = true;
     private final ScrollView taskScroll;
     private static boolean completedOpen;
     private long lastAdded = -1;
@@ -53,6 +55,11 @@ final class TaskListView extends LinearLayout {
         summary = PausaUi.text(context, "", 13, PausaUi.MUTED, false);
         summary.setPadding(0, dp(6), 0, 0);
         addView(summary, full());
+        followups = new LinearLayout(context);
+        followups.setOrientation(VERTICAL);
+        LayoutParams followupParams = full();
+        followupParams.topMargin = dp(14);
+        addView(followups, followupParams);
 
         LinearLayout composer = new LinearLayout(context);
         composer.setGravity(Gravity.CENTER_VERTICAL);
@@ -153,21 +160,24 @@ final class TaskListView extends LinearLayout {
         for (int section = 0; section < 3; section++) {
             for (long id : today.get(section)) {
                 TaskStore.Task task = byId.get(id);
-                if (task != null) todayRows.add(row(task, "Hoy · " + DayPlanStore.LABELS[section].toLowerCase(PausaUi.SPANISH),
+                String timing = TaskScheduleStore.describe(getContext(), id, DayPlanStore.day(0));
+                if (task != null && !task.following) todayRows.add(row(task, "Hoy · " + (timing.isEmpty() ? DayPlanStore.LABELS[section].toLowerCase(PausaUi.SPANISH) : timing),
                         TaskSheets.FRANJA_ICONS[section]));
             }
         }
         List<View> pending = new ArrayList<>(), scheduled = new ArrayList<>(), completed = new ArrayList<>();
-        int pendingCount = 0, doneCount = 0;
+        int pendingCount = 0, doneCount = 0, followingCount = 0;
         for (TaskStore.Task task : tasks) {
-            if (task.done) doneCount++; else pendingCount++;
-            if (DayPlanStore.contains(today, task.id)) continue;
+            if (task.done) doneCount++; else if (task.following) followingCount++; else pendingCount++;
+            if (task.following && !task.done) continue;
+            if (!task.following && DayPlanStore.contains(today, task.id)) continue;
             if (task.done) completed.add(row(task, null, null));
             else if (planned.containsKey(task.id)) scheduled.add(row(task, planned.get(task.id), "calendar"));
             else pending.add(row(task, null, null));
         }
-        summary.setText(tasks.isEmpty() ? "" : pendingCount + (pendingCount == 1 ? " pendiente" : " pendientes")
-                + (doneCount > 0 ? " · " + doneCount + (doneCount == 1 ? " hecha" : " hechas") : ""));
+        summary.setText(pendingCount + (pendingCount == 1 ? " pendiente" : " pendientes") + " · " + followingCount + " en seguimiento · "
+                + doneCount + (doneCount == 1 ? " hecha" : " hechas"));
+        renderFollowups(tasks, followingCount);
 
         group("Hoy", todayRows, null);
         group("Pendientes", pending, null);
@@ -184,6 +194,48 @@ final class TaskListView extends LinearLayout {
             hint.setGravity(Gravity.CENTER);
             taskRows.addView(hint, full());
         }
+    }
+
+    private void renderFollowups(List<TaskStore.Task> tasks, int count) {
+        Context c = getContext();
+        followups.removeAllViews();
+        followups.setBackground(PausaUi.outline(c, PausaUi.CREAM, PausaUi.LINE, 22));
+        followups.setPadding(dp(12), dp(6), dp(12), dp(6));
+        LinearLayout header = new LinearLayout(c);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView toggle = PausaUi.text(c, "En seguimiento" + (count > 0 ? " · " + count : ""), 15, PausaUi.GREEN, true);
+        toggle.setMinHeight(dp(48)); toggle.setGravity(Gravity.CENTER_VERTICAL);
+        toggle.setCompoundDrawables(new PausaUi.Symbol(c, "clock", PausaUi.GREEN, 18), null, null, null);
+        toggle.setCompoundDrawablePadding(dp(8));
+        toggle.setOnClickListener(v -> { followupsOpen = !followupsOpen; refresh(); });
+        toggle.setContentDescription((followupsOpen ? "Ocultar" : "Mostrar") + " seguimientos, " + count);
+        header.addView(toggle, new LayoutParams(0, -2, 1));
+        header.addView(PausaUi.iconButton(c, "plus", "Nuevo seguimiento", PausaUi.GREEN,
+                () -> FollowupSheets.edit(c, null, this::refresh)), new LayoutParams(dp(48), dp(48)));
+        followups.addView(header, full());
+        if (!followupsOpen) return;
+        if (count == 0) {
+            TextView hint = PausaUi.text(c, "Lo que esperas de otros, a la vista.", 12, PausaUi.MUTED, false);
+            hint.setPadding(dp(2), 0, 0, dp(8)); followups.addView(hint, full());
+            return;
+        }
+        ScrollView scroll = new PausaUi.Scroll(c);
+        LinearLayout rows = new LinearLayout(c); rows.setOrientation(VERTICAL);
+        List<TaskStore.Task> sorted = new ArrayList<>();
+        for (TaskStore.Task task : tasks) if (task.following && !task.done) sorted.add(task);
+        java.util.Collections.sort(sorted, (a, b) -> (a.reviewDate.isEmpty() ? "9999" : a.reviewDate).compareTo(b.reviewDate.isEmpty() ? "9999" : b.reviewDate));
+        for (TaskStore.Task task : sorted) {
+            LinearLayout row = new LinearLayout(c); row.setOrientation(VERTICAL);
+            row.setPadding(dp(4), dp(8), dp(4), dp(10));
+            row.setMinimumHeight(dp(56)); row.setBackground(PausaUi.ripple(c, android.graphics.Color.TRANSPARENT, 14));
+            row.addView(PausaUi.text(c, task.text, 15, PausaUi.INK, false));
+            boolean due = !task.reviewDate.isEmpty() && task.reviewDate.compareTo(DayPlanStore.day(0)) <= 0;
+            row.addView(PausaUi.text(c, FollowupSheets.detail(task), 12, due ? PausaUi.TERRACOTTA : PausaUi.MUTED, due));
+            row.setOnClickListener(v -> FollowupSheets.edit(c, task, this::refresh));
+            rows.addView(row, full());
+        }
+        scroll.addView(rows);
+        followups.addView(scroll, new LayoutParams(-1, count > 2 ? dp(144) : -2));
     }
 
     private void group(String label, List<View> rows, Runnable toggle) {

@@ -32,7 +32,7 @@ final class DayPlanStore {
         migrate(context);
         List<List<Long>> result = empty();
         Set<Long> valid = new HashSet<>();
-        for (TaskStore.Task task : TaskStore.getAll(context)) valid.add(task.id);
+        for (TaskStore.Task task : TaskStore.getAll(context)) if (!task.following) valid.add(task.id);
         Set<Long> seen = new HashSet<>();
         try {
             JSONArray sections = new JSONArray(prefs(context).getString(date, "[]"));
@@ -44,10 +44,16 @@ final class DayPlanStore {
                 }
             }
         } catch (JSONException ignored) { }
+        for (TaskScheduleStore.Schedule schedule : TaskScheduleStore.all(context)) {
+            if (schedule.deleted || !schedule.date().equals(date) || !valid.contains(schedule.taskId)) continue;
+            if (!contains(result, schedule.taskId)) result.get(schedule.minute() < 720 ? 0 : schedule.minute() < 1200 ? 1 : 2).add(schedule.taskId);
+        }
         return result;
     }
 
     static void save(Context context, String date, List<List<Long>> sections) {
+        List<List<Long>> before = read(context, date);
+        for (List<Long> section : before) for (Long id : section) if (!contains(sections, id)) TaskScheduleStore.removeDay(context, id, date);
         JSONArray json = new JSONArray();
         for (List<Long> section : sections) json.put(new JSONArray(section));
         prefs(context).edit().putString(date, json.toString()).apply();
@@ -56,6 +62,17 @@ final class DayPlanStore {
     static boolean contains(List<List<Long>> sections, long id) {
         for (List<Long> section : sections) if (section.contains(id)) return true;
         return false;
+    }
+
+    static void positionTimed(Context context, TaskScheduleStore.Schedule schedule) {
+        List<List<Long>> sections = read(context, schedule.date());
+        int target = schedule.minute() < 720 ? 0 : schedule.minute() < 1200 ? 1 : 2;
+        if (sections.get(target).contains(schedule.taskId)) return;
+        for (List<Long> section : sections) section.remove(schedule.taskId);
+        sections.get(target).add(schedule.taskId);
+        JSONArray json = new JSONArray();
+        for (List<Long> section : sections) json.put(new JSONArray(section));
+        prefs(context).edit().putString(schedule.date(), json.toString()).apply();
     }
 
     // Read legacy data directly: the old getter deletes elapsed slots while reading.

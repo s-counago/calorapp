@@ -42,6 +42,7 @@ public final class TradeRepublicClient implements AutoCloseable {
     private final OkHttpClient http;
     private JSONObject state;
     private String securitiesAccount = "";
+    private JSONArray valuationDiagnostic;
 
     public TradeRepublicClient(Store store, String userAgent, JSONObject device) throws Exception {
         this(store, userAgent, device, HttpUrl.get("https://api.traderepublic.com/"),
@@ -80,6 +81,7 @@ public final class TradeRepublicClient implements AutoCloseable {
                 .put("expiresAt", state.optLong("expiresAt"));
         if (state.has("snapshot")) result.put("snapshot", new JSONObject(state.getJSONObject("snapshot").toString()));
         if (state.has("portfolio")) result.put("portfolio", new JSONObject(state.getJSONObject("portfolio").toString()));
+        if (state.has("valuationDiagnostic")) result.put("valuationDiagnostic", new JSONObject(state.getJSONObject("valuationDiagnostic").toString()));
         return result;
     }
 
@@ -149,6 +151,7 @@ public final class TradeRepublicClient implements AutoCloseable {
     public synchronized void disconnect() throws Exception {
         clearProcess(); cookies.clear(); state.put("connected", false); state.remove("snapshot"); state.remove("portfolio");
         state.remove("instruments"); state.remove("valuationAttempt");
+        state.remove("valuationDiagnostic");
         securitiesAccount = ""; persist();
     }
 
@@ -170,28 +173,54 @@ public final class TradeRepublicClient implements AutoCloseable {
             throw new TradeException("QUOTE_COOLDOWN", "Ya se ha solicitado una valoración hace poco. Espera un minuto antes de repetir.");
         if (state.has("processId")) throw new TradeException("PENDING", "Completa primero la confirmación del acceso.");
         state.put("valuationAttempt", now); persist();
-        syncPortfolio(true);
+        valuationDiagnostic = new JSONArray();
+        try {
+            syncPortfolio(true);
+            trace("Valoración terminada");
+        } catch (Exception failure) {
+            String code = failure instanceof TradeException ? ((TradeException) failure).code : "CLIENT";
+            trace("Error: " + safeDiagnosticCode(code));
+            throw failure;
+        } finally {
+            state.put("valuationDiagnostic", new JSONObject().put("at", now).put("steps", valuationDiagnostic));
+            valuationDiagnostic = null;
+            persist();
+        }
+    }
+
+    private void trace(String message) {
+        if (valuationDiagnostic != null && valuationDiagnostic.length() < 140) valuationDiagnostic.put(message);
+    }
+
+    private static String safeDiagnosticCode(String code) {
+        return java.util.Arrays.asList("AUTH", "NO_SECURITIES_ACCOUNT", "SOCKET", "DATA_REJECTED", "PROTOCOL", "NETWORK", "STORAGE", "RATE_LIMIT").contains(code) ? code : "CLIENT";
     }
 
     private void syncPortfolio(boolean valuePositions) throws Exception {
         if (state.has("processId")) throw new TradeException("PENDING", "Completa primero la confirmación del acceso.");
         progress.changed("Comprobando la sesión de Trade Republic…");
+        trace("Comprobando sesión");
         verifySession();
+        trace("Sesión válida; cuenta de valores presente: " + !securitiesAccount.isEmpty());
         if (securitiesAccount.isEmpty() || securitiesAccount.equals("null") || securitiesAccount.length() > 100)
             throw new TradeException("NO_SECURITIES_ACCOUNT", "El banco no ha proporcionado una cuenta de valores. Se conserva la cartera anterior.");
         JSONObject portfolio;
         JSONObject instrumentCache = state.optJSONObject("instruments");
         try (TradeSocket socket = new TradeSocket(http, new Request.Builder().url(api).header("User-Agent", userAgent).build())) {
+            trace("Abriendo conexión de cotizaciones");
             socket.connect();
+            trace("Conexión abierta; consultando posiciones");
             progress.changed("Consultando las posiciones actuales…");
             JSONArray positions;
             try { positions = TradePortfolio.normalize(socket.readPortfolio(securitiesAccount)); }
             catch (org.json.JSONException error) { throw TradeException.protocol(); }
+            trace("Posiciones recibidas: " + positions.length());
             portfolio = new JSONObject().put("capturedAt", System.currentTimeMillis())
                     .put("accountId", ByteString.encodeUtf8(securitiesAccount).sha256().hex()).put("positions", positions);
             if (valuePositions) {
                 instrumentCache = TradeValuation.collect(positions, instrumentCache, new TradeValuation.Source() {
                     int quotes;
+                    @Override public void diagnostic(String message) { trace(message); }
                     @Override public Object instrument(String id) throws Exception {
                         progress.changed("Consultando los datos del instrumento…");
                         return socket.readInstrument(id);

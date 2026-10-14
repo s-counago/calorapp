@@ -27,6 +27,8 @@ public final class PlannerSmokeTest extends Instrumentation {
         Bundle result = new Bundle();
         try {
             Context context = getTargetContext();
+            context.getSharedPreferences("google_calendar", 0).edit().clear().commit();
+            context.getSharedPreferences("task_schedule", 0).edit().clear().commit();
             context.getSharedPreferences("daily_tasks", 0).edit().clear().commit();
             context.getSharedPreferences("day_boards", 0).edit().clear().commit();
             context.getSharedPreferences("short_term_planner", 0).edit().clear().commit();

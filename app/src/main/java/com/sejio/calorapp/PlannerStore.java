@@ -19,6 +19,15 @@ final class PlannerStore {
     }
 
     static Map<Long, Long> getAssignments(Context context, long oldestSlot) {
+        Map<Long, Long> result = new HashMap<>();
+        List<TaskStore.Task> tasks = TaskStore.getAll(context);
+        for (TaskScheduleStore.Schedule row : TaskScheduleStore.all(context)) {
+            if (!row.deleted && row.start >= oldestSlot && containsTask(tasks, row.taskId)) result.put(row.start, row.taskId);
+        }
+        return result;
+    }
+
+    private static Map<Long, Long> legacyAssignments(Context context, long oldestSlot) {
         Map<Long, Long> assignments = new HashMap<>();
         String storedAssignments = preferences(context).getString(KEY_ASSIGNMENTS, "{}");
         List<TaskStore.Task> tasks = TaskStore.getAll(context);
@@ -48,16 +57,17 @@ final class PlannerStore {
     }
 
     static void assign(Context context, long slotStart, long taskId) {
-        Map<Long, Long> assignments = getAssignments(context, currentSlotStart());
-        assignments.put(slotStart, taskId);
-        save(context, assignments);
+        String id = null;
+        int minutes = 30;
+        for (TaskScheduleStore.Schedule row : TaskScheduleStore.all(context)) {
+            if (row.deleted || row.start != slotStart) continue;
+            if (row.taskId == taskId) { id = row.id; minutes = row.minutes; } else TaskScheduleStore.remove(context, row.id);
+        }
+        TaskScheduleStore.put(context, id, taskId, slotStart, minutes);
     }
 
     static void clear(Context context, long slotStart) {
-        Map<Long, Long> assignments = getAssignments(context, currentSlotStart());
-        if (assignments.remove(slotStart) != null) {
-            save(context, assignments);
-        }
+        for (TaskScheduleStore.Schedule row : TaskScheduleStore.all(context)) if (!row.deleted && row.start == slotStart) TaskScheduleStore.remove(context, row.id);
     }
 
     static long currentSlotStart() {
@@ -68,7 +78,7 @@ final class PlannerStore {
 
     private static boolean containsTask(List<TaskStore.Task> tasks, long taskId) {
         for (TaskStore.Task task : tasks) {
-            if (task.id == taskId) {
+            if (task.id == taskId && !task.following) {
                 return true;
             }
         }

@@ -427,7 +427,8 @@ final class TodayView extends PausaUi.Scroll {
         PausaUi.Check check = new PausaUi.Check(activity, PausaUi.SAGE);
         check.setChecked(task.done);
         check.setContentDescription(task.text);
-        TextView text = PausaUi.text(activity, task.text, 15, PausaUi.INK, false);
+        String timing = TaskScheduleStore.describe(activity, task.id, DayPlanStore.day(0));
+        TextView text = PausaUi.text(activity, task.text + (timing.isEmpty() ? "" : "\n" + timing), 15, PausaUi.INK, false);
         text.setLineSpacing(0, 1.1f);
         text.setPadding(0, dp(8), 0, dp(8));
         strike(text, task.done);

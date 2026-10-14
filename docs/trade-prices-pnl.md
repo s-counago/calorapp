@@ -1,5 +1,21 @@
 # Cotizaciones y PnL · 6.7
 
+## Corrección 6.8.1 · 12 de octubre de 2026
+
+El diagnóstico en el Pixel confirmó que las dos posiciones reales llegan como
+`typeId: fund`, con `priceFactor: 1`. El filtro anterior admitía `stock` y `etf`
+y devolvía `UNSUPPORTED_TYPE` antes de pedir el ticker. Se admite ahora `fund`
+únicamente cuando declara un factor unitario explícito. Se conservan las
+comprobaciones de mercado, identidad y moneda; bonos y factores no unitarios
+siguen sin valorarse. Ambas posiciones devolvieron `VALUED` en la consulta real.
+
+La caché de metadatos tiene una versión nueva para renovar los rechazos antiguos
+en la siguiente actualización. El diagnóstico conserva el tipo y la presencia
+de factor unitario también cuando usa caché, sin incluir posiciones ni importes.
+
+Se verificaron 119 pruebas JVM sin fallos, compilación y lint. La comprobación real
+valida que se reciben precios; no compara importes con la app oficial de Trade.
+
 Se actualizó `main` a `2135d2e` antes de implementar esta fase. Se integró también
 la carga inicial `2e83b1b`, que aún no estaba en remoto: su acceso vive ahora en
 Bancos → Más opciones. Los movimientos CSV conservan su fecha contable y los tipos

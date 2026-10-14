@@ -54,6 +54,7 @@ final class BudgetView extends LinearLayout {
 
     static final int MONTH = 0, MOVES = 1, PORTFOLIO = 2, BANKS = 3;
     private static final String[] FILTERS = {"Todo", "Libre", "Fijo", "Ahorro", "Imprevistos", "Entradas", "No cuenta"};
+    private boolean creditOpen;
 
     private final PausaUi.Segmented tabs;
     private final View[] pages;
@@ -351,9 +352,16 @@ final class BudgetView extends LinearLayout {
         sheet.add(sum("Fijo por pagar", -cycle.fixedPending, PausaUi.MUTED, false), 2);
         sheet.add(sum(cycle.current ? "Ahorro apartado" : "Ahorro", -cycle.savingsReserve(), PausaUi.MUTED, false), 2);
         sheet.add(sum("Libre tras lo fijo y el ahorro", cycle.freeBudget(), PausaUi.INK, true), 2);
-        sheet.add(sum("Gastado de lo libre", -cycle.freeSpent, PausaUi.MUTED, false), 2);
+        sheet.add(sum("Compras de gasto libre", -cycle.freeOutflow, PausaUi.MUTED, false), 2);
+        long refunds = cycle.freeOutflow - cycle.freeSpent;
+        if (refunds > 0) sheet.add(sum("Devoluciones recibidas", refunds, PausaUi.MUTED, false), 2);
         if (cycle.unexpected > 0) sheet.add(sum("Imprevistos sin colchón", -cycle.uncovered(), PausaUi.MUTED, false), 2);
         sheet.add(sum(cycle.current ? "Te queda" : "Resultado", cycle.available(), cycle.available() < 0 ? PausaUi.TERRACOTTA : PausaUi.GREEN, true), 12);
+        if (cycle.current && cycle.left() > 0) {
+            sheet.add(sum("Gasto previsto hasta el cierre", cycle.projection() - cycle.available(), PausaUi.MUTED, false), 2);
+            sheet.add(sum("Previsión al cerrar", cycle.projection(), cycle.projection() < 0 ? PausaUi.TERRACOTTA : PausaUi.GREEN, true), 2);
+            sheet.add(note("La previsión mantiene el ritmo de compras. Las devoluciones recibidas cuentan una vez; no se suponen devoluciones futuras."), 4);
+        }
         sheet.add(note("El triángulo sobre la barra marca dónde deberías ir hoy para llegar justo al final del ciclo."), 4);
         sheet.footer(null, PausaUi.action(c, "Entendido", true, sheet::dismiss));
         sheet.show();
@@ -493,7 +501,7 @@ final class BudgetView extends LinearLayout {
         switch (item.type) {
             case Budget.REVIEW_INFLOW: {
                 reviewHeader(card, "in", PausaUi.SAGE, "+" + Budget.money(entry.txn.cents, true) + " · " + entry.label(), when, "¿Qué es esta entrada de dinero?");
-                chips.addView(answer(card, act, "Entre mis cuentas", "transfer", s -> { s.merchant.put(entry.merchantKey, "transfer"); s.txn.remove(entry.txn.id); }));
+                chips.addView(answer(card, act, "Entre mis cuentas", "transfer", s -> { s.merchant.put(entry.merchantKey, "transfer"); s.txn.put(entry.txn.id, "transfer"); }));
                 chips.addView(answer(card, act, "Un ingreso", "in", s -> s.txn.put(entry.txn.id, "income")));
                 chips.addView(answer(card, act, "Una devolución", "reset", s -> s.txn.put(entry.txn.id, "refund")));
                 break;
@@ -510,7 +518,7 @@ final class BudgetView extends LinearLayout {
                 reviewHeader(card, "spark", PausaUi.MUTED, Budget.money(entry.txn.cents, true) + " · " + entry.label(), when, "No sé qué es. ¿Dónde lo pongo?");
                 for (String id : new String[]{"compras", "comer", "ocio", "regalos", "personas", "transporte"}) {
                     Ledger.Category category = Ledger.category(id);
-                    chips.addView(answer(card, act, category.label, category.symbol, s -> { s.merchant.put(entry.merchantKey, "cat:" + id); s.txn.remove(entry.txn.id); }));
+                    chips.addView(answer(card, act, category.label, category.symbol, s -> { s.merchant.put(entry.merchantKey, "cat:" + id); s.txn.put(entry.txn.id, "cat:" + id); }));
                 }
                 chips.addView(answer(card, act, "Imprevisto", "umbrella", s -> s.txn.put(entry.txn.id, "unexpected")));
                 chips.addView(answer(card, act, "Déjalo en Otros", "check", s -> s.reviewed.add(entry.txn.id)));
@@ -1375,6 +1383,7 @@ final class BudgetView extends LinearLayout {
         if (txns == null || txns.isEmpty() || snapshot == null || snapshot.periods.isEmpty()) { empty(moves); return; }
         Budget.Cycle cycle = Budget.cycle(snapshot, index);
         moves.addView(cycleHeader(cycle), spaced(0, 6));
+        renderCreditCards(cycle);
         HorizontalScrollView scroller = new HorizontalScrollView(c);
         scroller.setHorizontalScrollBarEnabled(false);
         scroller.setClipToPadding(false);
@@ -1516,15 +1525,25 @@ final class BudgetView extends LinearLayout {
         sheet.subtitle(PausaUi.capitalize(Budget.WEEKDAYS[Ledger.weekday(txn.day)]) + " " + Budget.date(txn.day) + " · " + txn.sourceLabel
                 + " · " + Budget.money(txn.cents, true) + "\n" + txn.raw.trim());
         if (!txn.salary) {
-            Button page = PausaUi.quiet(c, "Ficha de «" + entry.merchant + "» · renombrar o unir", PausaUi.GREEN, () -> { sheet.dismiss(); merchantSheet(entry.merchantKey); });
+            Button page = PausaUi.quiet(c, "Editar nombre de este movimiento", PausaUi.GREEN, () -> { sheet.dismiss(); movementNameEditor(entry); });
             page.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             page.setCompoundDrawables(new PausaUi.Symbol(c, "edit", PausaUi.GREEN, 16), null, null, null);
             page.setCompoundDrawablePadding(dp(8));
             page.setPadding(dp(4), 0, dp(4), 0);
             sheet.add(page, 8);
         }
+        if (txn.duplicate) {
+            sheet.add(note("Este movimiento es la copia en cuenta de una compra o devolución de la tarjeta. Se conserva aquí y se cuenta una sola vez, en la tarjeta."), 8);
+            for (Budget.Entry original : snapshot.entries) if (original.txn.id.equals(txn.duplicateOf)) {
+                sheet.add(PausaUi.action(c, "Ver movimiento de la tarjeta", true, () -> { sheet.dismiss(); classify(original); }), 8);
+                break;
+            }
+            sheet.footer(null, PausaUi.quiet(c, "Cerrar", PausaUi.MUTED, sheet::dismiss));
+            sheet.show();
+            return;
+        }
         PausaUi.Check remember = new PausaUi.Check(c, PausaUi.SAGE);
-        remember.setChecked(txn.cents < 0 && !txn.salary);
+        remember.setChecked(false);
         String current = currentCode(entry);
         Flow chips = new Flow(c);
         if (txn.cents < 0) {
@@ -1561,9 +1580,9 @@ final class BudgetView extends LinearLayout {
         rememberRow.setPadding(dp(4), 0, dp(14), 0);
         remember.setContentDescription("Recordar para " + entry.merchant);
         rememberRow.addView(remember, new LayoutParams(dp(48), dp(48)));
-        rememberRow.addView(PausaUi.text(c, "Recordar para todo lo de «" + entry.merchant + "»", 14, PausaUi.INK, false), new LayoutParams(0, -2, 1));
+        rememberRow.addView(PausaUi.text(c, "Recordar para otros pagos de «" + entry.merchant + "»", 14, PausaUi.INK, false), new LayoutParams(0, -2, 1));
         rememberRow.setOnClickListener(v -> remember.performClick());
-        if (!txn.salary) sheet.add(rememberRow, 4);
+        if (txn.kind == Ledger.Kind.SPEND || txn.kind == Ledger.Kind.REFUND || txn.kind == Ledger.Kind.INVEST) sheet.add(rememberRow, 4);
         Button reset = !entry.taught.isEmpty() ? PausaUi.quiet(c, "Volver a lo automático", PausaUi.TERRACOTTA, () -> {
             sheet.dismiss();
             change("Vuelve a clasificarse solo", s -> {
@@ -1573,6 +1592,95 @@ final class BudgetView extends LinearLayout {
         }) : null;
         sheet.footer(reset, PausaUi.action(c, "Cerrar", false, sheet::dismiss));
         sheet.show();
+    }
+
+    private void renderCreditCards(Budget.Cycle cycle) {
+        Context c = getContext();
+        LinearLayout box = column();
+        box.setBackground(PausaUi.card(c));
+        box.setPadding(dp(14), dp(8), dp(14), dp(8));
+        Button toggle = PausaUi.quiet(c, "Tarjetas de crédito", PausaUi.GREEN, () -> { creditOpen = !creditOpen; renderMoves(); });
+        toggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        toggle.setCompoundDrawables(new PausaUi.Symbol(c, "card", PausaUi.GREEN, 20), null,
+                new PausaUi.Symbol(c, creditOpen ? "up" : "down", PausaUi.MUTED, 16), null);
+        toggle.setCompoundDrawablePadding(dp(10));
+        toggle.setContentDescription((creditOpen ? "Ocultar" : "Mostrar") + " transacciones de tarjetas de crédito y fecha de cobro");
+        box.addView(toggle, full());
+        moves.addView(box, spaced(0, 14));
+        if (!creditOpen) return;
+        box.addView(PausaUi.text(c, "Compras de este ciclo · cobro previsto el último día del mes siguiente a cada compra.", 13, PausaUi.MUTED, false), spaced(4, 12));
+        java.util.Map<Integer, List<Budget.Entry>> groups = new java.util.TreeMap<>();
+        for (Budget.Entry entry : cycle.entries) {
+            if (!CreditCards.isCredit(entry.txn, snapshot.settings) || entry.txn.duplicate
+                    || (entry.txn.kind != Ledger.Kind.SPEND && entry.txn.kind != Ledger.Kind.REFUND)) continue;
+            int due = CreditCards.collectionDay(entry.txn.day);
+            if (!groups.containsKey(due)) groups.put(due, new ArrayList<>());
+            groups.get(due).add(entry);
+        }
+        if (groups.isEmpty()) box.addView(PausaUi.text(c, "No hay compras de crédito identificadas en este ciclo. Puedes indicar cuáles de tus tarjetas son de crédito.", 14, PausaUi.MUTED, false), spaced(0, 8));
+        for (Map.Entry<Integer, List<Budget.Entry>> group : groups.entrySet()) {
+            long total = 0;
+            for (Budget.Entry entry : group.getValue()) total -= entry.txn.cents;
+            box.addView(PausaUi.eyebrow(c, "Cobro previsto · " + Ledger.iso(group.getKey()), PausaUi.GREEN), spaced(8, 4));
+            box.addView(PausaUi.editorial(c, Budget.money(total, true), 25), spaced(0, 8));
+            for (Budget.Entry entry : group.getValue()) {
+                LinearLayout row = column();
+                row.setPadding(dp(8), dp(10), dp(8), dp(10));
+                row.setBackground(PausaUi.ripple(c, PausaUi.CREAM, 14));
+                row.addView(PausaUi.text(c, entry.label() + " · " + Budget.money(entry.txn.cents, true), 14, PausaUi.INK, true));
+                row.addView(PausaUi.text(c, "Compra " + Budget.date(entry.txn.day) + " · " + entry.txn.sourceLabel, 12, PausaUi.MUTED, false));
+                row.setOnClickListener(v -> classify(entry));
+                box.addView(row, spaced(0, 6));
+            }
+        }
+        if (!groups.isEmpty()) box.addView(PausaUi.text(c, "La fecha es una previsión; no confirma que el banco haya realizado el cargo. Las devoluciones se muestran con su signo.", 12, PausaUi.MUTED, false), spaced(8, 4));
+        box.addView(PausaUi.quiet(c, "Elegir tarjetas de crédito", PausaUi.GREEN, this::chooseCreditCards), full());
+    }
+
+    private void chooseCreditCards() {
+        Context c = getContext();
+        PausaUi.Sheet sheet = new PausaUi.Sheet(c, "Tus tarjetas de crédito");
+        sheet.subtitle("Selecciona las tarjetas cuyas compras se cobran el último día del mes siguiente.");
+        Map<String, Ledger.Txn> cards = new java.util.LinkedHashMap<>();
+        for (Ledger.Txn txn : txns) if (txn.source.equals("card")) cards.put(txn.productId, txn);
+        Map<String, Boolean> selected = new java.util.HashMap<>();
+        for (Ledger.Txn txn : cards.values()) {
+            selected.put(txn.productId, CreditCards.isCredit(txn, snapshot.settings));
+            LinearLayout row = new LinearLayout(c);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            PausaUi.Check check = new PausaUi.Check(c, PausaUi.SAGE);
+            check.setChecked(selected.get(txn.productId));
+            check.setContentDescription(txn.sourceLabel);
+            check.setListener(value -> selected.put(txn.productId, value));
+            row.addView(check, new LayoutParams(dp(48), dp(48)));
+            row.addView(PausaUi.text(c, txn.sourceLabel, 15, PausaUi.INK, false), new LayoutParams(0, -2, 1));
+            row.setOnClickListener(v -> check.performClick());
+            sheet.add(row, 8);
+        }
+        if (cards.isEmpty()) sheet.subtitle("Importa o sincroniza los movimientos de tus tarjetas desde Bancos para verlos aquí.");
+        sheet.footer(null, PausaUi.action(c, "Guardar", true, () -> {
+            sheet.dismiss();
+            change("Tarjetas actualizadas", settings -> {
+                for (Map.Entry<String, Boolean> entry : selected.entrySet()) settings.cardTypes.put(entry.getKey(), entry.getValue() ? "credit" : "debit");
+            });
+        }));
+        sheet.show();
+    }
+
+    private void movementNameEditor(Budget.Entry entry) {
+        PausaUi.Sheet sheet = new PausaUi.Sheet(getContext(), "Nombre del movimiento");
+        sheet.subtitle("Solo cambia este movimiento. El concepto del banco se conserva: " + entry.txn.raw);
+        EditText name = field(sheet, "Cómo quieres verlo", entry.label(), InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        sheet.footer(PausaUi.quiet(getContext(), "Usar original", PausaUi.MUTED, () -> {
+            sheet.dismiss();
+            change("Nombre original recuperado", s -> s.movementNames.remove(entry.txn.id));
+        }), PausaUi.action(getContext(), "Guardar", true, () -> {
+            String value = name.getText().toString().trim();
+            if (value.isEmpty()) { name.setError("Escribe un nombre"); return; }
+            sheet.dismiss();
+            change("Nombre del movimiento guardado", s -> s.movementNames.put(entry.txn.id, value));
+        }));
+        TaskSheets.showWithKeyboard(sheet);
     }
 
     private static String currentCode(Budget.Entry entry) {
@@ -1588,8 +1696,12 @@ final class BudgetView extends LinearLayout {
         sheet.dismiss();
         Ledger.Txn txn = entry.txn;
         change(remember ? "«" + entry.merchant + "» → " + label : "Movimiento → " + label, s -> {
-            if (remember) { s.merchant.put(entry.merchantKey, code); s.txn.remove(txn.id); }
-            else s.txn.put(txn.id, code);
+            if (remember) s.merchant.put(entry.merchantKey, code);
+            s.txn.put(txn.id, code);
+            if (code.startsWith("rule:") && txn.cents < 0) {
+                Budget.Rule rule = s.rule(code.substring(5));
+                if (rule != null && rule.min >= 0) { rule.expected = -txn.cents; rule.learn = false; }
+            }
         });
     }
 
@@ -1609,7 +1721,7 @@ final class BudgetView extends LinearLayout {
     private void ruleEditor(Budget.Rule existing, Budget.Entry from) {
         Context c = getContext();
         PausaUi.Sheet sheet = new PausaUi.Sheet(c, existing == null ? "Nuevo pago fijo" : "Editar pago fijo");
-        sheet.subtitle("Pausa lo reconoce cuando el concepto del movimiento contiene alguno de los textos. El importe y el día se ajustan solos con lo que se cobra.");
+        sheet.subtitle("Reconoce el concepto y, si lo necesitas, un rango de importe. Útil para distinguir suscripciones de un mismo comercio.");
         EditText name = field(sheet, "Nombre", existing != null ? existing.name : from != null ? from.merchant : "", InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         long amountCents = existing != null ? existing.expected : from != null ? Math.abs(from.txn.cents) : 0;
         EditText amount = field(sheet, "Importe habitual en euros", amountCents > 0 ? Budget.money(amountCents, true).replace(" €", "").replace(".", "") : "",
@@ -1619,6 +1731,28 @@ final class BudgetView extends LinearLayout {
         String words = existing != null ? TextUtils.join(", ", existing.keywords) : from != null ? from.merchantKey : "";
         EditText keywords = field(sheet, "Texto del concepto (separa con comas)", words, InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         if (existing != null && existing.invest) keywords.setEnabled(false);
+        PausaUi.Check useRange = new PausaUi.Check(c, PausaUi.SAGE);
+        useRange.setChecked(existing != null && (existing.min >= 0 || existing.max >= 0));
+        LinearLayout rangeToggle = new LinearLayout(c);
+        rangeToggle.setGravity(Gravity.CENTER_VERTICAL);
+        rangeToggle.setBackground(PausaUi.ripple(c, PausaUi.CREAM, 18));
+        rangeToggle.addView(useRange, new LayoutParams(dp(48), dp(48)));
+        rangeToggle.addView(PausaUi.text(c, "Reconocer también por importe", 14, PausaUi.INK, false), new LayoutParams(0, -2, 1));
+        useRange.setContentDescription("Reconocer también por importe");
+        sheet.add(rangeToggle, 8);
+        EditText minimum = field(sheet, "Desde (€)", existing != null && existing.min >= 0 ? amountInput(existing.min) : amountInput(amountCents),
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        EditText maximum = field(sheet, "Hasta (€)", existing != null && existing.max >= 0 ? amountInput(existing.max) : amountInput(amountCents),
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        Runnable showRange = () -> {
+            minimum.setEnabled(useRange.isChecked());
+            maximum.setEnabled(useRange.isChecked());
+            minimum.setAlpha(useRange.isChecked() ? 1f : .45f);
+            maximum.setAlpha(useRange.isChecked() ? 1f : .45f);
+        };
+        useRange.setListener(checked -> showRange.run());
+        rangeToggle.setOnClickListener(v -> useRange.performClick());
+        showRange.run();
         final int[] months = {existing != null ? existing.frequency : 1};
         int[] options = {1, 3, 12};
         sheet.add(PausaUi.text(c, "Cada cuánto se cobra", 12, PausaUi.MUTED, true), 6);
@@ -1677,6 +1811,15 @@ final class BudgetView extends LinearLayout {
             List<String> keys = new ArrayList<>();
             for (String part : keywords.getText().toString().split(",")) if (!Ledger.key(part).isEmpty()) keys.add(Ledger.key(part));
             if (keys.isEmpty() && (existing == null || !existing.invest)) { keywords.setError("Añade un texto que aparezca en el concepto"); return; }
+            long min = -1, max = -1;
+            if (useRange.isChecked()) {
+                try {
+                    min = Ledger.cents(minimum.getText().toString().trim().replace(",", "."));
+                    max = Ledger.cents(maximum.getText().toString().trim().replace(",", "."));
+                    if (min <= 0 || max < min) throw new IllegalArgumentException();
+                } catch (Exception invalid) { maximum.setError("Introduce un rango válido; usa el mismo valor para un importe exacto"); return; }
+            }
+            final long minAmount = min, maxAmount = max;
             sheet.dismiss();
             change(title + (existing == null ? " añadido a lo fijo" : " guardado"), s -> {
                 Budget.Rule rule = existing == null ? null : s.rule(existing.id);
@@ -1686,11 +1829,16 @@ final class BudgetView extends LinearLayout {
                 }
                 rule.name = title; rule.symbol = symbol[0]; rule.expected = cents; rule.day = dayOfMonth; rule.frequency = months[0];
                 rule.learn = learn.isChecked();
+                rule.min = minAmount; rule.max = maxAmount;
                 if (!rule.invest) { rule.keywords.clear(); rule.keywords.addAll(keys); }
                 if (from != null) s.txn.put(from.txn.id, "rule:" + rule.id);
             });
         }));
         TaskSheets.showWithKeyboard(sheet);
+    }
+
+    private static String amountInput(long cents) {
+        return java.math.BigDecimal.valueOf(cents, 2).toPlainString().replace('.', ',');
     }
 
     private EditText field(PausaUi.Sheet sheet, String hint, String value, int type) {

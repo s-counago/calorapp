@@ -108,7 +108,8 @@ final class Budget {
     static final class Settings {
         final List<Rule> rules = new ArrayList<>();
         final Map<String, String> txn = new HashMap<>(), merchant = new HashMap<>(), alias = new HashMap<>();
-        final Map<String, String> names = new HashMap<>(), notes = new HashMap<>();
+        final Map<String, String> names = new HashMap<>(), notes = new HashMap<>(), movementNames = new HashMap<>();
+        final Map<String, String> cardTypes = new HashMap<>();
         /** Amount the owner expects for one fixed line in one cycle, keyed like {@link #skipKey}. */
         final Map<String, Long> planned = new HashMap<>();
         final Set<String> skipped = new HashSet<>(), dismissed = new HashSet<>(), reviewed = new HashSet<>(), separate = new HashSet<>();
@@ -155,7 +156,8 @@ final class Budget {
             for (Rule rule : rules) list.put(rule.toJson());
             return new JSONObject().put("version", VERSION).put("rules", list).put("txn", new JSONObject(txn))
                     .put("merchant", new JSONObject(merchant)).put("alias", new JSONObject(alias)).put("names", new JSONObject(names))
-                    .put("notes", new JSONObject(notes)).put("skipped", new JSONArray(skipped)).put("dismissed", new JSONArray(dismissed))
+                    .put("notes", new JSONObject(notes)).put("movementNames", new JSONObject(movementNames)).put("cardTypes", new JSONObject(cardTypes))
+                    .put("skipped", new JSONArray(skipped)).put("dismissed", new JSONArray(dismissed))
                     .put("reviewed", new JSONArray(reviewed)).put("separate", new JSONArray(separate)).put("planned", new JSONObject(planned))
                     .put("goal", goal).put("cushion", cushion).put("cushionDay", cushionDay).put("cushionGoal", cushionGoal)
                     .put("cushionMoves", moves());
@@ -176,6 +178,8 @@ final class Budget {
             copy(json.optJSONObject("alias"), settings.alias);
             copy(json.optJSONObject("names"), settings.names);
             copy(json.optJSONObject("notes"), settings.notes);
+            copy(json.optJSONObject("movementNames"), settings.movementNames);
+            copy(json.optJSONObject("cardTypes"), settings.cardTypes);
             copy(json.optJSONArray("skipped"), settings.skipped);
             copy(json.optJSONArray("dismissed"), settings.dismissed);
             copy(json.optJSONArray("reviewed"), settings.reviewed);
@@ -225,7 +229,7 @@ final class Budget {
     static final class Entry {
         final Ledger.Txn txn;
         Ledger.Kind kind;
-        String category, merchant, merchantKey, note;
+        String category, merchant, merchantKey, note, movementName;
         Rule rule;
         boolean unexpected;
         /** Where the decision came from: "" (automatic), "txn" (this movement) or "merchant" (remembered). */
@@ -239,7 +243,7 @@ final class Budget {
         boolean free() { return rule == null && !unexpected && (kind == Ledger.Kind.SPEND || kind == Ledger.Kind.REFUND); }
         boolean saving() { return rule == null && kind == Ledger.Kind.INVEST; }
         boolean counts() { return fixed() || free() || unexpected || saving() || kind == Ledger.Kind.INCOME; }
-        String label() { return txn.salary ? "Nómina" : merchant; }
+        String label() { return movementName != null ? movementName : txn.salary ? "Nómina" : merchant; }
     }
 
     static List<Entry> resolve(List<Ledger.Txn> txns, Settings settings) {
@@ -252,11 +256,15 @@ final class Budget {
             String name = settings.names.get(entry.merchantKey);
             entry.merchant = name != null ? name : readable.containsKey(entry.merchantKey) ? readable.get(entry.merchantKey) : txn.merchant;
             entry.note = settings.notes.get(txn.id);
+            entry.movementName = settings.movementNames.get(txn.id);
+            if (txn.duplicate) { entries.add(entry); continue; }
             String code = settings.txn.get(txn.id);
             if (code != null) entry.taught = "txn";
-            else if (!txn.duplicate && txn.kind != Ledger.Kind.INCOME && !txn.reward) {
-                code = settings.merchant.get(entry.merchantKey);
-                if (code == null) code = settings.merchant.get(txn.merchantKey);
+            else if (!txn.reward) {
+                String remembered = settings.merchant.get(entry.merchantKey);
+                if (remembered == null) remembered = settings.merchant.get(txn.merchantKey);
+                if (txn.kind == Ledger.Kind.SPEND || txn.kind == Ledger.Kind.REFUND || txn.kind == Ledger.Kind.INVEST
+                        || txn.kind == Ledger.Kind.TRANSFER && "transfer".equals(remembered)) code = remembered;
                 if (code != null) entry.taught = "merchant";
             }
             if (code == null || !apply(entry, code, settings)) {
@@ -403,7 +411,7 @@ final class Budget {
         Period period;
         int index, count, today;
         boolean current, salaryEstimated;
-        long salary, otherIncome, fixedPaid, fixedPending, freeSpent, previousAtSameDay = -1, averageDaily = -1;
+        long salary, otherIncome, fixedPaid, fixedPending, freeSpent, freeOutflow, previousAtSameDay = -1, averageDaily = -1;
         /** Savings: what the owner put aside (TR purchases minus saveback), the gift and the target for the cycle. */
         long saved, gift, savingsTarget, invested, toCushion;
         /** Unexpected obligations and how much of them the cushion absorbed; cushion balance -1 when not set. */
@@ -430,8 +438,8 @@ final class Budget {
         long dailyAllowance() { return left() == 0 ? 0 : Math.max(0, available()) / left(); }
         /** Free money left at the end of the cycle at the current spending rate. */
         long projection() {
-            long rate = elapsed() >= 4 || averageDaily < 0 ? freeSpent / Math.max(1, elapsed()) : averageDaily;
-            return available() - rate * left();
+            long rate = elapsed() >= 4 || averageDaily < 0 ? freeOutflow / Math.max(1, elapsed()) : averageDaily;
+            return available() - Math.max(0, rate) * left();
         }
         /**
          * Savings when the cycle closes: what was put aside plus the free money left, or minus what was
@@ -577,6 +585,7 @@ final class Budget {
             if (!entry.free()) continue;
             long spend = -entry.txn.cents;
             cycle.freeSpent += spend;
+            cycle.freeOutflow += Math.max(0, spend);
             cycle.daily[entry.txn.day - period.start] += spend;
             Slice slice = slices.get(entry.category);
             if (slice == null) { slice = new Slice(Ledger.category(entry.category)); slices.put(entry.category, slice); }
@@ -605,7 +614,7 @@ final class Budget {
                 long sameDay = 0, total = 0;
                 for (Entry entry : snapshot.entries) {
                     if (!entry.free() || !previous.contains(entry.txn.day)) continue;
-                    total -= entry.txn.cents;
+                    total += Math.max(0, -entry.txn.cents);
                     if (entry.txn.day - previous.start < cycle.elapsed()) sameDay -= entry.txn.cents;
                 }
                 cycle.previousAtSameDay = sameDay;

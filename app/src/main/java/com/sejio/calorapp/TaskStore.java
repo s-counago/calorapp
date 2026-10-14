@@ -33,7 +33,9 @@ final class TaskStore {
                 tasks.add(new Task(
                         jsonTask.getLong("id"),
                         jsonTask.getString("text"),
-                        jsonTask.optBoolean("done", false)
+                        jsonTask.optBoolean("done", false),
+                        jsonTask.optBoolean("following", false), jsonTask.optString("waitingFor"),
+                        jsonTask.optString("expectedDate"), jsonTask.optString("reviewDate")
                 ));
             }
         } catch (JSONException ignored) {
@@ -64,7 +66,7 @@ final class TaskStore {
         for (int index = 0; index < tasks.size(); index++) {
             Task task = tasks.get(index);
             if (task.id == id) {
-                tasks.set(index, new Task(task.id, task.text, done));
+                tasks.set(index, task.copy(task.text, done));
                 save(context, tasks);
                 return;
             }
@@ -81,7 +83,7 @@ final class TaskStore {
         for (int index = 0; index < tasks.size(); index++) {
             Task task = tasks.get(index);
             if (task.id == id) {
-                tasks.set(index, new Task(task.id, normalizedText, task.done));
+                tasks.set(index, task.copy(normalizedText, task.done));
                 save(context, tasks);
                 return;
             }
@@ -96,6 +98,17 @@ final class TaskStore {
                 save(context, tasks);
                 return;
             }
+        }
+    }
+
+    static void setFollowup(Context context, long id, boolean following, String waitingFor, String expectedDate, String reviewDate) {
+        List<Task> tasks = getAll(context);
+        for (int i = 0; i < tasks.size(); i++) {
+            Task task = tasks.get(i);
+            if (task.id != id) continue;
+            tasks.set(i, new Task(id, task.text, following ? false : task.done, following, waitingFor.trim(), expectedDate, reviewDate));
+            save(context, tasks);
+            return;
         }
     }
 
@@ -184,6 +197,10 @@ final class TaskStore {
                 jsonTask.put("id", task.id);
                 jsonTask.put("text", task.text);
                 jsonTask.put("done", task.done);
+                jsonTask.put("following", task.following);
+                jsonTask.put("waitingFor", task.waitingFor);
+                jsonTask.put("expectedDate", task.expectedDate);
+                jsonTask.put("reviewDate", task.reviewDate);
                 jsonTasks.put(jsonTask);
             } catch (JSONException ignored) {
                 // These primitive values are always valid JSON.
@@ -191,6 +208,7 @@ final class TaskStore {
         }
 
         preferences(context).edit().putString(KEY_TASKS, jsonTasks.toString()).apply();
+        CalendarSync.request(context);
     }
 
     private static SharedPreferences preferences(Context context) {
@@ -202,11 +220,25 @@ final class TaskStore {
         final long id;
         final String text;
         final boolean done;
+        final boolean following;
+        final String waitingFor, expectedDate, reviewDate;
 
         Task(long id, String text, boolean done) {
+            this(id, text, done, false, "", "", "");
+        }
+
+        Task(long id, String text, boolean done, boolean following, String waitingFor, String expectedDate, String reviewDate) {
             this.id = id;
             this.text = text;
             this.done = done;
+            this.following = following;
+            this.waitingFor = waitingFor;
+            this.expectedDate = expectedDate;
+            this.reviewDate = reviewDate;
+        }
+
+        Task copy(String text, boolean done) {
+            return new Task(id, text, done, following, waitingFor, expectedDate, reviewDate);
         }
     }
 }

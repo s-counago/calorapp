@@ -30,6 +30,18 @@ public class TradeValuationTest {
         }
     }
 
+    @Test public void diagnosticShowsStagesWithoutInstrumentOrFinancialValues() throws Exception {
+        StringBuilder report = new StringBuilder();
+        Source source = new Source() {
+            @Override public void diagnostic(String message) { report.append(message).append('\n'); }
+        };
+        TradeValuation.collect(new JSONArray().put(row("PRIVATE_INSTRUMENT", "72.983")), null, source, now);
+        assertTrue(report.toString().contains("Consultando metadatos"));
+        assertTrue(report.toString().contains("Consultando último precio"));
+        assertTrue(report.toString().contains("Resultado: VALUED"));
+        for (String privateValue : new String[]{"PRIVATE_INSTRUMENT", "72.983", "123.45", "Example ETF"}) assertFalse(report.toString().contains(privateValue));
+    }
+
     @Test public void fractionalValuesAreExactAndDuplicateHoldingsUseOneQuote() throws Exception {
         JSONArray rows = new JSONArray().put(row("TEST", "0.123456789")).put(row("TEST", "2"));
         Source source = new Source();
@@ -83,6 +95,49 @@ public class TradeValuationTest {
         assertEquals(1, source.instruments); assertEquals(2, source.quotes);
         TradeValuation.collect(new JSONArray().put(row("TEST", "2")), cache, source, now + TradeValuation.METADATA_AGE + 1);
         assertEquals(2, source.instruments);
+    }
+
+    @Test public void fundWithExplicitUnitFactorReceivesAQuote() throws Exception {
+        Source source = new Source() {
+            @Override public Object instrument(String id) throws Exception {
+                return TradeValuationTest.this.instrument(id).put("typeId", "fund").put("priceFactor", 1);
+            }
+        };
+        JSONArray rows = new JSONArray().put(row("TEST", "2"));
+        TradeValuation.collect(rows, null, source, now);
+        assertEquals(1, source.quotes);
+        assertEquals("VALUED", rows.getJSONObject(0).getString("valuationStatus"));
+        assertEquals("246.90", rows.getJSONObject(0).getString("estimatedValue"));
+    }
+
+    @Test public void fundWithoutUnitFactorRemainsUnsupported() throws Exception {
+        for (Object factor : new Object[]{JSONObject.NULL, "0.01", "100"}) {
+            Source source = new Source() {
+                @Override public Object instrument(String id) throws Exception {
+                    return TradeValuationTest.this.instrument(id).put("typeId", "fund").put("priceFactor", factor);
+                }
+            };
+            JSONArray rows = new JSONArray().put(row("TEST", "2"));
+            TradeValuation.collect(rows, null, source, now);
+            assertEquals(0, source.quotes);
+            assertEquals("UNSUPPORTED_TYPE", rows.getJSONObject(0).getString("valuationStatus"));
+        }
+    }
+
+    @Test public void legacyCacheIsRefreshedAndNewCacheRetainsDiagnostic() throws Exception {
+        StringBuilder report = new StringBuilder();
+        Source source = new Source() {
+            @Override public void diagnostic(String message) { report.append(message).append('\n'); }
+        };
+        JSONObject old = new JSONObject().put("TEST", new JSONObject().put("fetchedAt", now)
+                .put("unitPrice", false).put("exchange", "LSX"));
+        JSONObject cache = TradeValuation.collect(new JSONArray().put(row("TEST", "1")), old, source, now);
+        report.setLength(0);
+        TradeValuation.collect(new JSONArray().put(row("TEST", "1")), cache, source, now + 1);
+        assertEquals(1, source.instruments);
+        assertEquals(2, source.quotes);
+        assertTrue(report.toString().contains("Metadatos en caché"));
+        assertTrue(report.toString().contains("Tipo: etf"));
     }
 
     @Test public void requestLimitIsVisibleAndNoExtraInstrumentsAreContacted() throws Exception {

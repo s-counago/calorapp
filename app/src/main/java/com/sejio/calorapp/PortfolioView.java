@@ -185,7 +185,34 @@ final class PortfolioView extends PausaUi.Scroll implements TradeRepository.List
         update = PausaUi.action(c, busy ? "Leyendo tu cartera…" : "Actualizar valoración", true, this::refresh);
         update.setEnabled(!busy);
         box.addView(update, spaced(12, 0));
+        box.addView(PausaUi.quiet(c, "Diagnóstico de precios", PausaUi.MUTED, this::diagnostic), spaced(4, 0));
         return box;
+    }
+
+    private void diagnostic() {
+        Context c = getContext();
+        JSONObject state = trade.current();
+        JSONObject diagnostic = state == null ? null : state.optJSONObject("valuationDiagnostic");
+        StringBuilder report = new StringBuilder("Pausa · precios de Trade Republic\n");
+        try { report.append("Versión: ").append(c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName).append('\n'); }
+        catch (Exception ignored) { }
+        if (diagnostic == null) report.append("Pulsa Actualizar valoración para registrar el diagnóstico.");
+        else {
+            report.append(date(diagnostic.optLong("at"))).append('\n');
+            org.json.JSONArray steps = diagnostic.optJSONArray("steps");
+            if (steps != null) for (int i = 0; i < steps.length(); i++) report.append(steps.optString(i)).append('\n');
+        }
+        PausaUi.Sheet sheet = new PausaUi.Sheet(c, "Diagnóstico de precios");
+        sheet.subtitle("Pasos de la última consulta. No incluye credenciales, cuenta, nombres de activos ni importes.");
+        TextView text = PausaUi.text(c, report.toString(), 13, PausaUi.INK, false);
+        text.setTextIsSelectable(true);
+        sheet.add(text, 12);
+        sheet.footer(PausaUi.quiet(c, "Copiar", PausaUi.GREEN, () -> {
+            android.content.ClipboardManager clipboard = (android.content.ClipboardManager) c.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Diagnóstico de precios", report));
+            PausaUi.snack(c, "Diagnóstico copiado", null, null);
+        }), PausaUi.action(c, "Cerrar", false, sheet::dismiss));
+        sheet.show();
     }
 
     private String stamp() {

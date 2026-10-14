@@ -14,6 +14,7 @@ final class TradeValuation {
     interface Source {
         Object instrument(String id) throws Exception;
         Object ticker(String id, String exchange) throws Exception;
+        default void diagnostic(String message) { }
     }
 
     static JSONObject collect(JSONArray positions, JSONObject oldCache, Source source, long now) throws Exception {
@@ -23,6 +24,7 @@ final class TradeValuation {
         for (int i = 0; i < positions.length(); i++) {
             JSONObject row = positions.getJSONObject(i);
             String id = row.getString("instrumentId");
+            source.diagnostic("Instrumento " + (i + 1));
             JSONObject info = fetched.get(id);
             if (info == null) {
                 info = new JSONObject();
@@ -31,14 +33,21 @@ final class TradeValuation {
                 }
                 JSONObject metadata = oldCache == null ? null : oldCache.optJSONObject(id);
                 long age = metadata == null ? -1 : now - metadata.optLong("fetchedAt");
-                if (age < 0 || age > METADATA_AGE) metadata = metadata(id, source.instrument(id), now);
+                if (age < 0 || age > METADATA_AGE || metadata.optInt("schema") != 3) {
+                    source.diagnostic("Consultando metadatos");
+                    Object rawMetadata = source.instrument(id);
+                    metadata = metadata(id, rawMetadata, now);
+                } else source.diagnostic("Metadatos en caché");
+                source.diagnostic(metadata.getString("diagnostic"));
                 cache.put(id, metadata);
                 info.put("name", metadata.optString("name", id)).put("exchange", metadata.optString("exchange"));
                 if (!metadata.optBoolean("unitPrice")) info.put("valuationStatus", "UNSUPPORTED_TYPE");
                 else if (metadata.optString("exchange").isEmpty()) info.put("valuationStatus", "NO_MARKET");
                 else if (System.nanoTime() >= deadline) info.put("valuationStatus", "LIMIT");
                 else {
+                    source.diagnostic("Consultando último precio");
                     Object raw = source.ticker(id, metadata.getString("exchange"));
+                    source.diagnostic(quoteShape(raw));
                     JSONObject parsed = quote(id, metadata.getString("exchange"), raw, System.currentTimeMillis());
                     if (parsed.optString("currency").isEmpty() && metadata.getString("exchange").equals("LSX"))
                         parsed.put("currency", "EUR").put("currencyBasis", "lsx_eur_unit_quote_convention");
@@ -48,18 +57,49 @@ final class TradeValuation {
             }
             row.put("name", info.optString("name", id));
             JSONObject quote = info.optJSONObject("quote");
-            if (quote == null) { row.put("valuationStatus", info.optString("valuationStatus", "UNAVAILABLE")); continue; }
+            if (quote == null) {
+                row.put("valuationStatus", info.optString("valuationStatus", "UNAVAILABLE"));
+                source.diagnostic("Resultado: " + row.getString("valuationStatus"));
+                continue;
+            }
             if (!quote.optString("previousCloseCurrency").isEmpty() && !quote.optString("currency").isEmpty()
                     && !quote.getString("previousCloseCurrency").equals(quote.getString("currency"))) throw TradeException.protocol();
             row.put("quote", new JSONObject(quote.toString()));
-            if (!quote.has("price")) { row.put("valuationStatus", "NO_PRICE"); continue; }
+            if (!quote.has("price")) { row.put("valuationStatus", "NO_PRICE"); source.diagnostic("Resultado: NO_PRICE"); continue; }
             BigDecimal quantity = new BigDecimal(TradeRepublicClient.decimal(row.get("quantity")));
             if (quantity.signum() < 0) { row.put("valuationStatus", "UNSUPPORTED_QUANTITY"); continue; }
             row.put("estimatedValue", quantity.multiply(new BigDecimal(quote.getString("price"))).toPlainString());
             row.put("valuationStatus", quote.optString("currency").isEmpty() ? "UNKNOWN_CURRENCY" : "VALUED");
             row.put("pnl", TradePnl.calculate(row));
+            source.diagnostic("Resultado: " + row.getString("valuationStatus"));
         }
         return cache;
+    }
+
+    private static String metadataShape(Object raw) {
+        if (!(raw instanceof JSONObject)) return "Metadatos: formato inesperado";
+        JSONObject data = (JSONObject) raw;
+        String type = data.optString("typeId");
+        String known = java.util.Arrays.asList("stock", "etf", "bond", "crypto", "fund", "derivative").contains(type) ? type : "otro o ausente";
+        JSONArray exchanges = data.optJSONArray("exchangeIds");
+        return "Tipo: " + known + "; mercados: " + (exchanges == null ? 0 : exchanges.length())
+                + "; factor presente: " + (data.has("priceFactor") && !data.isNull("priceFactor"))
+                + "; factor unitario: " + unitFactor(data);
+    }
+
+    private static boolean unitFactor(JSONObject data) {
+        try {
+            return data.has("priceFactor") && !data.isNull("priceFactor")
+                    && new BigDecimal(TradeRepublicClient.decimal(data.get("priceFactor"))).compareTo(BigDecimal.ONE) == 0;
+        } catch (Exception failure) { return false; }
+    }
+
+    private static String quoteShape(Object raw) {
+        if (!(raw instanceof JSONObject)) return "Cotización: formato inesperado";
+        JSONObject data = (JSONObject) raw, last = data.optJSONObject("last");
+        return "Último: " + (last != null) + "; precio: " + (last != null && last.has("price") && !last.isNull("price"))
+                + "; fecha: " + (last != null && last.has("time")) + "; referencia: " + (data.optJSONObject("pre") != null)
+                + "; divisa: " + (data.has("currency") || data.has("currencyId") || last != null && (last.has("currency") || last.has("currencyId")));
     }
 
     static JSONObject metadata(String id, Object raw, long now) throws Exception {
@@ -68,7 +108,7 @@ final class TradeValuation {
         String returnedId = string(data, "isin", 200);
         if (!returnedId.isEmpty() && !returnedId.equals(id)) throw TradeException.protocol();
         String type = string(data, "typeId", 40);
-        boolean unit = type.equals("stock") || type.equals("etf");
+        boolean unit = type.equals("stock") || type.equals("etf") || type.equals("fund") && unitFactor(data);
         if (data.has("priceFactor") && !data.isNull("priceFactor"))
             unit &= new BigDecimal(TradeRepublicClient.decimal(data.get("priceFactor"))).compareTo(BigDecimal.ONE) == 0;
         String name = string(data, "shortName", 300);
@@ -81,7 +121,7 @@ final class TradeValuation {
             exchange = (String) first; // Same selection as pytr; no venue probing or fallbacks.
         }
         return new JSONObject().put("name", name.isEmpty() ? id : name).put("exchange", exchange)
-                .put("unitPrice", unit).put("fetchedAt", now);
+                .put("unitPrice", unit).put("fetchedAt", now).put("schema", 3).put("diagnostic", metadataShape(data));
     }
 
     static JSONObject quote(String id, String exchange, Object raw, long receivedAt) throws Exception {
