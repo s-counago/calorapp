@@ -49,14 +49,26 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | `GET /api/day?day=` | Contadores frente a objetivos, plan por franjas y hábitos del día. |
 | `GET /api/review?day=` | Revisión de la semana (lunes a domingo) que contiene ese día. |
 | `GET /api/devices`, `DELETE /api/devices/<id>` | Dispositivos con sesión. |
+| `POST /api/logs`, `GET /api/logs` | Logs que envían las apps (`{ app_version, entries: [{ at, level, tag, message, data }] }`). Filtros: `level` (mínimo), `tag`, `device_id`, `search`, `since`, `limit`. Se guardan 30 días. |
+| `GET /api/status` | Estado de la sincronización: `seq` del servidor, cada dispositivo con su último pull y push y cuánto va por detrás, recuento de registros y errores del cliente en 24 h. |
+| `GET /api/history/<tabla>/<id>` | Todas las versiones guardadas de un registro y quién escribió cada una. |
 
 Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
 
 ## MCP
 
-Herramientas: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `day_summary` y `weekly_review`. Lo que haga un agente llega al móvil en la siguiente sincronización.
+Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `day_summary` y `weekly_review`.
+
+Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 
 Para conectarlo en Claude: Ajustes → Conectores → Añadir conector personalizado → `https://<tu-worker>/mcp`.
+
+## Observabilidad
+
+- Cada petición tiene un `request_id`. Si el cliente lo envía en `X-Request-Id`, se respeta; si no, se genera. Siempre vuelve en la respuesta y en el cuerpo de los errores.
+- El Worker escribe una línea JSON por evento (`request`, `sync_apply`, `sync_pull`, `mcp_tool`, `auth_failed`, `client_log`…) con `request_id`, `actor` (`device:<id>`, `web`, `mcp:<cliente>`) y `source`. Workers Logs está activado en `wrangler.jsonc`. En directo: `npx wrangler tail --format json`.
+- Los errores devuelven `{ error, code, request_id }`. Los fallos de login dicen el motivo: `token_expired`, `wrong_audience`, `account_not_allowed`, `email_unverified`, `invalid_device_token`…
+- `change_log` guarda cada versión aceptada de cada registro con su autor.
 
 ## Desarrollo
 

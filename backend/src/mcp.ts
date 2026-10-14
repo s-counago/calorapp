@@ -1,7 +1,10 @@
 // A stateless MCP server over Streamable HTTP: every POST carries one JSON-RPC message
 // and gets one JSON response. Tools call the same domain functions as the REST API.
 
-import { ValidationError } from './schema';
+import { TABLE_NAMES, ValidationError, isTableName } from './schema';
+import { queryClientLogs, syncStatus } from './diagnostics';
+import { errorFields, log } from './log';
+import { recordHistory } from './sync';
 import type { Env } from './auth';
 import {
   METRIC_KINDS,
@@ -199,7 +202,52 @@ const TOOLS: Tool[] = [
     inputSchema: { type: 'object', properties: { day } },
     run: (env, args) => weeklyReview(env.DB, dayArg(env, args.day), env.TIME_ZONE),
   },
+  // Diagnostics: read-only tools for debugging the apps and the sync.
+  {
+    name: 'get_client_logs',
+    title: 'Read app logs',
+    description: 'Recent log lines sent by the Android app (and other clients), newest first. Use it to debug problems on the phone.',
+    readOnly: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'], description: 'Minimum level.' },
+        tag: { type: 'string' },
+        device_id: { type: 'string' },
+        search: { type: 'string', description: 'Text to find in the message.' },
+        since: { type: 'integer', description: 'Epoch milliseconds.' },
+        limit: { type: 'integer', minimum: 1, maximum: 1000 },
+      },
+    },
+    run: (env, args) => queryClientLogs(env.DB, args as never),
+  },
+  {
+    name: 'sync_status',
+    title: 'Sync status',
+    description: 'Server change number, each device with its last pull and push and how far behind it is, record counts and client errors in the last 24 hours.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {} },
+    run: (env) => syncStatus(env.DB),
+  },
+  {
+    name: 'record_history',
+    title: 'Record history',
+    description: 'Every saved version of one record (task, habit, check, counter entry or setting) with who wrote it: phone, web or agent.',
+    readOnly: true,
+    inputSchema: {
+      type: 'object',
+      properties: { table: { type: 'string', enum: TABLE_NAMES }, id: { type: 'string' } },
+      required: ['table', 'id'],
+    },
+    run: (env, args) => {
+      if (!isTableName(args.table)) throw new ValidationError('Unknown table');
+      return recordHistory(env.DB, args.table, stringArg(args.id, 'id'));
+    },
+  },
 ];
+
+/** Every tool, exposed for tests that keep the MCP surface and its documentation in step. */
+export const MCP_TOOLS = TOOLS.map(({ name, title, description, inputSchema, readOnly }) => ({ name, title, description, inputSchema, readOnly }));
 
 type JsonRpcId = string | number | null;
 
@@ -258,14 +306,18 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
       const tool = TOOLS.find((candidate) => candidate.name === params.name);
       if (!tool) return error(id, -32602, `Unknown tool: ${String(params.name)}`);
       const args = (params.arguments ?? {}) as Record<string, unknown>;
+      const started = Date.now();
       try {
         const value = await tool.run(env, args);
+        log('info', 'mcp_tool', { tool: tool.name, ok: true, ms: Date.now() - started });
         const structured = Array.isArray(value) ? { items: value } : (value as Record<string, unknown>);
         return result(id, { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: structured, isError: false });
       } catch (caught) {
         if (caught instanceof ValidationError || caught instanceof NotFoundError) {
+          log('warn', 'mcp_tool', { tool: tool.name, ok: false, ms: Date.now() - started, error: caught.message });
           return result(id, { content: [{ type: 'text', text: caught.message }], isError: true });
         }
+        log('error', 'mcp_tool', { tool: tool.name, ok: false, ms: Date.now() - started, ...errorFields(caught) });
         throw caught;
       }
     }

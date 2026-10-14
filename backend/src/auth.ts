@@ -2,7 +2,7 @@
 // The web keeps a signed session cookie; the Android app trades a Google ID token
 // for a long-lived device token, so it keeps syncing after hours without coverage.
 
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import { createRemoteJWKSet, errors as joseErrors, jwtVerify, type JWTPayload } from 'jose';
 
 export interface Env {
   DB: D1Database;
@@ -31,7 +31,33 @@ const GOOGLE_CERTS = new URL('https://www.googleapis.com/oauth2/v3/certs');
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 
-export class AuthError extends Error {}
+export type AuthErrorCode =
+  | 'invalid_token'
+  | 'token_expired'
+  | 'token_not_yet_valid'
+  | 'wrong_audience'
+  | 'wrong_issuer'
+  | 'email_unverified'
+  | 'account_not_allowed'
+  | 'google_exchange_failed';
+
+/** A sign-in failure with a precise reason, so logs say why instead of a bare 401/403. */
+export class AuthError extends Error {
+  constructor(message: string, readonly code: AuthErrorCode) {
+    super(message);
+    this.name = 'AuthError';
+  }
+}
+
+function describeJoseError(caught: unknown): AuthError {
+  if (caught instanceof joseErrors.JWTExpired) return new AuthError('Google token expired; check the phone clock if this repeats', 'token_expired');
+  if (caught instanceof joseErrors.JWTClaimValidationFailed) {
+    if (caught.claim === 'aud') return new AuthError('Google token was issued for a different client ID', 'wrong_audience');
+    if (caught.claim === 'iss') return new AuthError('Token was not issued by Google', 'wrong_issuer');
+    if (caught.claim === 'iat' || caught.claim === 'nbf') return new AuthError('Google token is not valid yet; check the device clock', 'token_not_yet_valid');
+  }
+  return new AuthError('Google token could not be verified', 'invalid_token');
+}
 
 // Encoding helpers ----------------------------------------------------------------
 
@@ -106,12 +132,11 @@ export async function verifyGoogleIdToken(env: Env, idToken: string, audiences: 
   let payload: JWTPayload;
   try {
     ({ payload } = await jwtVerify(idToken, jwks, { issuer: GOOGLE_ISSUERS, audience: audiences }));
-  } catch {
-    throw new AuthError('Invalid Google token');
+  } catch (caught) {
+    throw describeJoseError(caught);
   }
-  if (payload.email_verified !== true || !isAllowed(env, payload.email)) {
-    throw new AuthError('This Google account is not allowed');
-  }
+  if (payload.email_verified !== true) throw new AuthError('Google account email is not verified', 'email_unverified');
+  if (!isAllowed(env, payload.email)) throw new AuthError('This Google account is not allowed', 'account_not_allowed');
   return payload as JWTPayload & { email: string };
 }
 
@@ -147,9 +172,12 @@ export async function exchangeGoogleCode(env: Env, code: string, redirectUri: st
       code_verifier: verifier,
     }),
   });
-  if (!response.ok) throw new AuthError('Google rejected the sign-in code');
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new AuthError(`Google rejected the sign-in code (${response.status} ${detail.slice(0, 200)})`, 'google_exchange_failed');
+  }
   const body = (await response.json()) as { id_token?: string };
-  if (!body.id_token) throw new AuthError('Google returned no ID token');
+  if (!body.id_token) throw new AuthError('Google returned no ID token', 'google_exchange_failed');
   return verifyGoogleIdToken(env, body.id_token, [env.GOOGLE_CLIENT_ID]);
 }
 

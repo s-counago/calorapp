@@ -4,6 +4,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // Workers Logs: every JSON line the Worker prints is searchable in the dashboard for 7 days.
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
   "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": true },
   "d1_databases": [
     // Create with `npx wrangler d1 create pausa` and paste the id here.

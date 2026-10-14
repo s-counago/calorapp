@@ -86,3 +86,13 @@ describe('sync', () => {
     expect((await push(token, [{ table: 'bank', id: 'x', updated_at: 1, deleted: false, data: {} }])).status).toBe(400);
   });
 });
+
+describe('sync with older clients', () => {
+  it('fills defaults for fields an older app does not send', async () => {
+    const token = await deviceToken();
+    const result = await push(token, [{ table: 'habits', id: 'h1', updated_at: 1, deleted: false, data: { name: 'Leer', weekly_goal: 2, created_day: '2026-10-01' } }]);
+    expect(result.status).toBe(200);
+    const { changes } = await pull(token);
+    expect(changes[0].data.archived).toBe(false);
+  });
+});

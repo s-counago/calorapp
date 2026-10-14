@@ -25,7 +25,10 @@ import {
   type Principal,
 } from './auth';
 import { ValidationError } from './schema';
-import { applyChanges, parseChanges, pullChanges } from './sync';
+import { applyChanges, parseChanges, pullChanges, recordHistory } from './sync';
+import { annotate, errorFields, log, requestId } from './log';
+import { parseClientLogs, queryClientLogs, recordPull, recordPush, storeClientLogs, syncStatus } from './diagnostics';
+import { isTableName } from './schema';
 import {
   NotFoundError,
   createHabit,
@@ -47,12 +50,21 @@ type AppEnv = { Bindings: Env; Variables: { principal: Principal } };
 
 export const app = new Hono<AppEnv>();
 
+// Errors carry a machine-readable code and the request id, so a client log line can be
+// matched with the server's.
 app.onError((caught, c) => {
-  if (caught instanceof ValidationError) return c.json({ error: caught.message }, 400);
-  if (caught instanceof NotFoundError) return c.json({ error: caught.message }, 404);
-  if (caught instanceof AuthError) return c.json({ error: caught.message }, 403);
-  console.error(caught);
-  return c.json({ error: 'Internal error' }, 500);
+  const request_id = requestId();
+  if (caught instanceof ValidationError) {
+    log('warn', 'validation_failed', { path: c.req.path, error: caught.message });
+    return c.json({ error: caught.message, code: 'invalid_request', request_id }, 400);
+  }
+  if (caught instanceof NotFoundError) return c.json({ error: caught.message, code: 'not_found', request_id }, 404);
+  if (caught instanceof AuthError) {
+    log('warn', 'auth_failed', { path: c.req.path, reason: caught.code, error: caught.message });
+    return c.json({ error: caught.message, code: caught.code, request_id }, 403);
+  }
+  log('error', 'handler_failed', { path: c.req.path, ...errorFields(caught) });
+  return c.json({ error: 'Internal error', code: 'internal', request_id }, 500);
 });
 
 app.get('/health', (c) => c.json({ ok: true }));
@@ -82,9 +94,13 @@ app.get('/auth/callback', async (c) => {
   try {
     ({ email } = await exchangeGoogleCode(c.env, code, redirectUri, pending.verifier));
   } catch (caught) {
-    if (caught instanceof AuthError) return c.text('Esta cuenta de Google no tiene acceso a Pausa.', 403);
+    if (caught instanceof AuthError) {
+      log('warn', 'auth_failed', { flow: 'web', reason: caught.code, error: caught.message });
+      return c.text(`No se ha podido iniciar sesión: ${caught.message} (${requestId()})`, 403);
+    }
     throw caught;
   }
+  log('info', 'web_login', {});
   c.header('Set-Cookie', await sessionCookie(c.env, email), { append: true });
   c.header('Set-Cookie', cookie(LOGIN_COOKIE, '', 0), { append: true });
   return c.redirect(safeNext(pending.next));
@@ -101,6 +117,7 @@ app.post('/auth/device', async (c) => {
   if (typeof body.id_token !== 'string') throw new ValidationError('id_token is required');
   await verifyGoogleIdToken(c.env, body.id_token, androidAudiences(c.env));
   const device = await createDevice(c.env, typeof body.name === 'string' ? body.name : 'Android');
+  log('info', 'device_registered', { device_id: device.id });
   return c.json({ device_id: device.id, token: device.token });
 });
 
@@ -191,8 +208,13 @@ function redirect(location: string, headers: Headers): Response {
 
 app.use('/api/*', async (c, next) => {
   const principal = await authenticate(c.env, c.req.raw);
-  if (!principal) return c.json({ error: 'Not signed in' }, 401);
+  if (!principal) {
+    const bearer = c.req.header('Authorization')?.startsWith('Bearer ');
+    const code = bearer ? 'invalid_device_token' : 'not_signed_in';
+    return c.json({ error: bearer ? 'Device token unknown or revoked' : 'Not signed in', code, request_id: requestId() }, 401);
+  }
   c.set('principal', principal);
+  annotate(principal.kind === 'device' ? { actor: `device:${principal.deviceId}`, source: 'android' } : { actor: 'web', source: 'web' });
   await next();
 });
 
@@ -209,12 +231,50 @@ app.get('/api/me', (c) => c.json({ principal: c.get('principal'), today: today(c
 app.get('/api/sync', async (c) => {
   const since = Number(c.req.query('since') ?? 0);
   if (!Number.isInteger(since) || since < 0) throw new ValidationError('since must be a non-negative integer');
-  return c.json(await pullChanges(c.env.DB, since));
+  const result = await pullChanges(c.env.DB, since);
+  const principal = c.get('principal');
+  if (principal.kind === 'device') await recordPull(c.env.DB, principal.deviceId, result.cursor);
+  log('info', 'sync_pull', { since, cursor: result.cursor, changes: result.changes.length, more: result.more });
+  return c.json(result);
 });
 
 app.post('/api/sync', async (c) => {
   const body = await c.req.json().catch(() => null);
-  return c.json(await applyChanges(c.env.DB, parseChanges(body)));
+  const result = await applyChanges(c.env.DB, parseChanges(body));
+  const principal = c.get('principal');
+  if (principal.kind === 'device') await recordPush(c.env.DB, principal.deviceId, result.applied.length);
+  return c.json(result);
+});
+
+// Diagnostics -----------------------------------------------------------------------
+
+app.post('/api/logs', async (c) => {
+  const { entries, appVersion } = parseClientLogs(await c.req.json().catch(() => null));
+  const principal = c.get('principal');
+  await storeClientLogs(c.env.DB, principal.kind === 'device' ? principal.deviceId : null, entries, appVersion);
+  return c.json({ stored: entries.length });
+});
+
+app.get('/api/logs', async (c) => {
+  const query = c.req.query();
+  return c.json(
+    await queryClientLogs(c.env.DB, {
+      since: query.since ? Number(query.since) : undefined,
+      level: query.level,
+      tag: query.tag,
+      device_id: query.device_id,
+      search: query.search,
+      limit: query.limit ? Number(query.limit) : undefined,
+    }),
+  );
+});
+
+app.get('/api/status', async (c) => c.json(await syncStatus(c.env.DB)));
+
+app.get('/api/history/:table/:id', async (c) => {
+  const table = c.req.param('table');
+  if (!isTableName(table)) throw new ValidationError('Unknown table');
+  return c.json(await recordHistory(c.env.DB, table, c.req.param('id')));
 });
 
 app.get('/api/tasks', async (c) => {

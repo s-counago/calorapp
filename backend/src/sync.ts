@@ -3,6 +3,7 @@
 // Every accepted write gets a new server `seq`, and devices pull everything above
 // the cursor they last saw.
 
+import { actor, log, requestId } from './log';
 import { TABLES, TABLE_NAMES, ValidationError, isTableName, toRecord, validateRecord, type Row, type TableName } from './schema';
 
 export interface Change {
@@ -49,6 +50,20 @@ export function parseChanges(body: unknown): Change[] {
   });
 }
 
+const SEQ = `(SELECT value FROM meta WHERE key = 'seq')`;
+
+/** Copies the row into change_log only if the upsert before it won (it then carries this seq). */
+function auditStatement(db: D1Database, change: Change, offset: number, who: string, rid: string | null): D1PreparedStatement {
+  const fields = Object.keys(TABLES[change.table].fields);
+  const json = `json_object(${fields.map((field) => `'${field}', ${field}`).join(', ')})`;
+  return db
+    .prepare(
+      `INSERT INTO change_log (seq, table_name, record_id, deleted, updated_at, data, actor, request_id, logged_at) ` +
+        `SELECT seq, ?, id, deleted, updated_at, ${json}, ?, ?, ? FROM ${change.table} WHERE id = ? AND seq = ${SEQ} + ${offset}`,
+    )
+    .bind(change.table, who, rid, Date.now(), change.id);
+}
+
 function upsertStatement(db: D1Database, change: Change, offset: number): D1PreparedStatement {
   const row = validateRecord(change.table, change.data);
   if (change.table === 'habit_checks' && change.id !== `${row.habit_id}:${row.day}`) {
@@ -56,7 +71,7 @@ function upsertStatement(db: D1Database, change: Change, offset: number): D1Prep
   }
   const fields = Object.keys(TABLES[change.table].fields);
   const columns = ['id', ...fields, 'updated_at', 'deleted', 'seq'];
-  const placeholders = [...columns.slice(0, -1).map(() => '?'), `(SELECT value FROM meta WHERE key = 'seq') + ${offset}`];
+  const placeholders = [...columns.slice(0, -1).map(() => '?'), `${SEQ} + ${offset}`];
   const updates = columns.slice(1).map((column) => `${column} = excluded.${column}`);
   const sql =
     `INSERT INTO ${change.table} (${columns.join(', ')}) VALUES (${placeholders.join(', ')}) ` +
@@ -71,11 +86,15 @@ function upsertStatement(db: D1Database, change: Change, offset: number): D1Prep
  */
 export async function applyChanges(db: D1Database, changes: Change[]): Promise<{ applied: string[]; cursor: number }> {
   if (changes.length === 0) return { applied: [], cursor: await currentSeq(db) };
-  const statements = changes.map((change, index) => upsertStatement(db, change, index + 1));
+  const who = actor();
+  const rid = requestId() ?? null;
+  const statements = changes.flatMap((change, index) => [upsertStatement(db, change, index + 1), auditStatement(db, change, index + 1, who, rid)]);
   statements.push(db.prepare(`UPDATE meta SET value = value + ? WHERE key = 'seq' RETURNING value`).bind(changes.length));
   const results = await db.batch<{ id?: string; value?: number }>(statements);
-  const applied = results.slice(0, -1).flatMap((result) => result.results.map((row) => String(row.id)));
+  const applied = results.filter((_, index) => index % 2 === 0 && index < results.length - 1).flatMap((result) => result.results.map((row) => String(row.id)));
   const cursor = Number(results[results.length - 1].results[0].value);
+  const rejected = changes.length - applied.length;
+  log('info', 'sync_apply', { received: changes.length, applied: applied.length, stale: rejected, cursor, tables: [...new Set(changes.map((change) => change.table))] });
   return { applied, cursor };
 }
 
@@ -118,4 +137,13 @@ export async function pullChanges(db: D1Database, since: number): Promise<PullRe
     .sort((a, b) => a.seq - b.seq)
     .map((entry) => entry.change);
   return { cursor, more, changes };
+}
+
+/** All recorded versions of a record, oldest first, with who wrote each one. */
+export async function recordHistory(db: D1Database, table: TableName, id: string) {
+  const { results } = await db
+    .prepare(`SELECT seq, deleted, updated_at, data, actor, request_id, logged_at FROM change_log WHERE table_name = ? AND record_id = ? ORDER BY seq`)
+    .bind(table, id)
+    .all<{ seq: number; deleted: number; updated_at: number; data: string; actor: string; request_id: string | null; logged_at: number }>();
+  return results.map((row) => ({ ...row, deleted: row.deleted === 1, data: JSON.parse(row.data) as unknown }));
 }

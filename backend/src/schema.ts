@@ -8,6 +8,8 @@ export interface FieldSpec {
   required?: boolean;
   values?: readonly string[];
   max?: number;
+  /** Used when a client leaves the field out, e.g. an older app version. */
+  default?: string | number | boolean;
 }
 
 export interface TableSpec {
@@ -38,7 +40,7 @@ export const TABLES = {
       name: { type: 'text', required: true, max: 200 },
       weekly_goal: { type: 'int', required: true },
       created_day: { type: 'day', required: true },
-      archived: { type: 'bool' },
+      archived: { type: 'bool', default: false },
       position: { type: 'real' },
     },
   },
@@ -78,6 +80,7 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Checks one field value and converts it to what SQLite stores. */
 function coerce(table: string, name: string, spec: FieldSpec, value: unknown): string | number | null {
+  if ((value === null || value === undefined) && spec.default !== undefined) value = spec.default;
   if (value === null || value === undefined) {
     if (spec.required) throw new ValidationError(`${table}.${name} is required`);
     return null;
