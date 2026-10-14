@@ -16,12 +16,12 @@ import java.util.List;
 
 /**
  * App shell. Content scrolls beneath a floating navigation; a contextual action button sits beside it.
- * Sections: 0 Hoy, 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero.
+ * Sections: 0 Hoy, 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero, 8 Kanban.
  */
 public class MainActivity extends Activity implements TodayView.Host {
     private static final int REQUEST_NOTIFICATIONS = 42;
     /** Order of the Tareas segments and the section each one opens. */
-    private static final int[] TASK_SECTIONS = {2, 6, 4, 5};
+    private static final int[] TASK_SECTIONS = {2, 6, 4, 5, 8};
 
     private TodayView counterView;
     private TicketPlannerView ticketPlannerView;
@@ -31,6 +31,7 @@ public class MainActivity extends Activity implements TodayView.Host {
     private PlannerView todayPlannerView;
     private WeeklyPlannerView weeklyPlannerView;
     private BudgetView budgetView;
+    private KanbanView kanbanView;
     private View[] sections;
     private PausaNavigation navigation;
     private PausaUi.Segmented taskTabs;
@@ -109,6 +110,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (todayPlannerView != null) todayPlannerView.refresh();
         if (weeklyPlannerView != null) weeklyPlannerView.refresh();
         if (currentSection == 7 && budgetView != null) budgetView.refresh();
+        if (kanbanView != null) kanbanView.refresh();
     }
 
     private View createAppView() {
@@ -124,7 +126,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         taskHeader = new LinearLayout(this);
         taskHeader.setOrientation(LinearLayout.VERTICAL);
         taskHeader.setPadding(dp(20), dp(10), dp(20), dp(6));
-        taskTabs = new PausaUi.Segmented(this, new String[]{"Lista", "Hoy", "Mañana", "Semana"},
+        taskTabs = new PausaUi.Segmented(this, new String[]{"Lista", "Hoy", "Mañana", "Semana", "Kanban"},
                 index -> showSection(TASK_SECTIONS[index]));
         taskHeader.addView(taskTabs, new LinearLayout.LayoutParams(-1, -2));
         column.addView(taskHeader, new LinearLayout.LayoutParams(-1, -2));
@@ -140,7 +142,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         weeklyPlannerView = new WeeklyPlannerView(this);
         todayPlannerView = new PlannerView(this, 0);
         budgetView = new BudgetView(this);
-        sections = new View[]{counterView, ticketPlannerView, taskListView, habitListView, plannerView, weeklyPlannerView, todayPlannerView, budgetView};
+        kanbanView = new KanbanView(this);
+        sections = new View[]{counterView, ticketPlannerView, taskListView, habitListView, plannerView, weeklyPlannerView, todayPlannerView, budgetView, kanbanView};
         for (View section : sections) {
             section.setVisibility(View.GONE);
             content.addView(section, new FrameLayout.LayoutParams(-1, -1));
@@ -225,7 +228,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         }
     }
 
-    private static boolean isTaskSection(int section) { return section == 2 || (section >= 4 && section <= 6); }
+    private static boolean isTaskSection(int section) { return section == 2 || (section >= 4 && section <= 6) || section == 8; }
 
     private void showSection(int section) {
         section = Math.max(0, Math.min(sections.length - 1, section));
@@ -247,6 +250,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (section == 4) plannerView.refresh();
         if (section == 5) weeklyPlannerView.refresh();
         if (section == 6) todayPlannerView.refresh();
+        if (section == 8) kanbanView.refresh();
         if (section == 7) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
             budgetView.refresh();
@@ -301,7 +305,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         }
         String icon = section == 1 ? "ticket" : "plus";
         String label = section == 1 ? "Revisar y formalizar" : section == 3 ? "Nuevo hábito"
-                : section == 6 ? "Añadir al plan de hoy" : section == 4 ? "Añadir al plan de mañana" : "Nueva tarea";
+                : section == 6 ? "Añadir al plan de hoy" : section == 4 ? "Añadir al plan de mañana"
+                : section == 8 ? "Nueva tarjeta" : "Nueva tarea";
         fab.setContentDescription(label);
         if (Build.VERSION.SDK_INT >= 26) fab.setTooltipText(label);
         if (icon.equals(fabIcon)) {
@@ -350,6 +355,7 @@ public class MainActivity extends Activity implements TodayView.Host {
             case 7: break; // Money has its own actions; bank sync stays explicit.
             case 1: ticketPlannerView.review(); break;
             case 2: taskListView.focusComposer(); break;
+            case 8: kanbanView.focusComposer(); break;
             case 3: habitListView.createHabit(); break;
             case 4: plannerView.openPicker(0); break;
             case 6: todayPlannerView.openPicker(PausaUi.currentFranja()); break;
@@ -364,6 +370,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         todayPlannerView.refresh();
         plannerView.refresh();
         weeklyPlannerView.refresh();
+        kanbanView.refresh();
     }
 
     // ------------------------------------------------------------ TodayView.Host

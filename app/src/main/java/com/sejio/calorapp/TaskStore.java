@@ -24,8 +24,10 @@ final class TaskStore {
         LegacyImport.runOnce(context);
         List<Task> tasks = new ArrayList<>();
         // List order is creation order; `position` belongs to the day plan (see DayPlanStore).
+        // Board tasks live in the Kanban (KanbanView) and join the list only while planned on a day.
         for (Map<String, Object> row : PausaDb.get(context).rows(
-                "SELECT * FROM tasks WHERE deleted = 0 AND status != 'cancelled' ORDER BY created_at, local_id")) {
+                "SELECT * FROM tasks WHERE deleted = 0 AND status != 'cancelled' AND (board IS NULL OR plan_date IS NOT NULL) "
+                        + "ORDER BY created_at, local_id")) {
             tasks.add(fromRow(row));
         }
         return tasks;
@@ -34,10 +36,15 @@ final class TaskStore {
     static Task fromRow(Map<String, Object> row) {
         return new Task((Long) row.get("local_id"), (String) row.get("title"), "done".equals(row.get("status")),
                 Long.valueOf(1).equals(row.get("following")), text(row.get("waiting_for")),
-                text(row.get("expected_date")), text(row.get("review_date")));
+                text(row.get("expected_date")), text(row.get("review_date")), (String) row.get("board"));
     }
 
     static long add(Context context, String text) {
+        return add(context, text, null);
+    }
+
+    /** Adds a task to the list, or to a Kanban column when `board` is set. */
+    static long add(Context context, String text, String board) {
         String normalizedText = text.trim();
         if (normalizedText.isEmpty()) {
             return -1;
@@ -45,6 +52,7 @@ final class TaskStore {
         LegacyImport.runOnce(context);
         Map<String, Object> data = new HashMap<>();
         data.put("title", normalizedText);
+        data.put("board", board);
         data.put("status", "todo");
         data.put("created_at", System.currentTimeMillis());
         data.put("following", 0);
@@ -95,6 +103,8 @@ final class TaskStore {
         data.put("expected_date", empty(expectedDate));
         data.put("review_date", empty(reviewDate));
         if (following && task.done) { data.put("status", "todo"); data.put("completed_at", null); }
+        // A follow-up lives in the list's follow-up panel, so it leaves the Kanban.
+        if (following) data.put("board", null);
         update(context, id, data);
     }
 
@@ -117,6 +127,7 @@ final class TaskStore {
         data.put("waiting_for", empty(task.waitingFor));
         data.put("expected_date", empty(task.expectedDate));
         data.put("review_date", empty(task.reviewDate));
+        data.put("board", task.board);
         // The tombstone keeps created_at, so the task returns to its old place in the list.
         if (uid == null) {
             data.put("created_at", System.currentTimeMillis());
@@ -148,6 +159,51 @@ final class TaskStore {
         if (uid == null) return;
         PausaDb.get(context).put("tasks", uid, data, false);
         changed(context);
+    }
+
+    // ------------------------------------------------------------------ Kanban
+
+    /** Kanban columns in board order, as stored in `tasks.board`. */
+    static final String[] BOARD = {"stack", "priority", "vault", "failed"};
+    static final String[] BOARD_LABELS = {"Stack infinito", "Prioridad", "Baúl", "Fracasos"};
+    /** Tasks done before the board existed (the old Notion count); synced as a setting. */
+    static final String DONE_BASE = "tasks_done_base";
+
+    /** Open tasks of one column, newest first. */
+    static List<Task> board(Context context, String column) {
+        LegacyImport.runOnce(context);
+        List<Task> tasks = new ArrayList<>();
+        for (Map<String, Object> row : PausaDb.get(context).rows(
+                "SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND board = ? ORDER BY created_at DESC, local_id DESC", column)) {
+            tasks.add(fromRow(row));
+        }
+        return tasks;
+    }
+
+    static Map<String, Integer> boardCounts(Context context) {
+        Map<String, Integer> counts = new HashMap<>();
+        for (String column : BOARD) counts.put(column, 0);
+        for (Map<String, Object> row : PausaDb.get(context).rows(
+                "SELECT board, COUNT(*) AS n FROM tasks WHERE deleted = 0 AND status = 'todo' AND board IS NOT NULL GROUP BY board")) {
+            counts.put((String) row.get("board"), ((Long) row.get("n")).intValue());
+        }
+        return counts;
+    }
+
+    /** Every task done: the old count plus board tasks completed since. Same rule as the backend's board summary. */
+    static int doneTotal(Context context) {
+        long base = 0;
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT value FROM settings WHERE id = ? AND deleted = 0", DONE_BASE)) {
+            try { base = Math.round(Double.parseDouble((String) row.get("value"))); } catch (RuntimeException ignored) { }
+        }
+        return (int) base + PausaDb.get(context).count(
+                "SELECT COUNT(*) FROM tasks WHERE deleted = 0 AND board IS NOT NULL AND status = 'done'");
+    }
+
+    static void setBoard(Context context, long id, String column) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("board", column);
+        update(context, id, data);
     }
 
     private static void changed(Context context) {
@@ -215,12 +271,19 @@ final class TaskStore {
         final boolean done;
         final boolean following;
         final String waitingFor, expectedDate, reviewDate;
+        /** Kanban column, or null for an ordinary task. */
+        final String board;
 
         Task(long id, String text, boolean done) {
-            this(id, text, done, false, "", "", "");
+            this(id, text, done, false, "", "", "", null);
         }
 
         Task(long id, String text, boolean done, boolean following, String waitingFor, String expectedDate, String reviewDate) {
+            this(id, text, done, following, waitingFor, expectedDate, reviewDate, null);
+        }
+
+        Task(long id, String text, boolean done, boolean following, String waitingFor, String expectedDate, String reviewDate, String board) {
+            this.board = board;
             this.id = id;
             this.text = text;
             this.done = done;
@@ -231,7 +294,7 @@ final class TaskStore {
         }
 
         Task copy(String text, boolean done) {
-            return new Task(id, text, done, following, waitingFor, expectedDate, reviewDate);
+            return new Task(id, text, done, following, waitingFor, expectedDate, reviewDate, board);
         }
     }
 }

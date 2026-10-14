@@ -46,6 +46,7 @@ El objetivo es que cualquier fallo se pueda depurar sin tener el móvil delante.
 - Las vistas no cambian: `TaskStore`, `DayPlanStore`, `HabitStore` y `CalorieStore` leen y escriben `PausaDb`. Toda escritura pasa por `PausaDb.put`, que pone `updated_at`, encola el registro y pide una sincronización.
 - Tareas y hábitos conservan un `local_id` numérico (el id antiguo) para las vistas, las franjas de `TaskScheduleStore` y Google Calendar; el `id` del backend es un UUID.
 - El plan del día vive en la tarea (`plan_date`, `plan_slot`, `position`): una tarea está planificada como mucho en un día. El orden de la lista es el de creación.
+- Las tareas con `board` (`stack`, `priority`, `vault`, `failed`) son el tablero Kanban (`KanbanView`) y no salen en la lista salvo que estén planificadas en un día. Las hechas del tablero suman al contador `tasks_done_base` (ajuste sincronizado) para dar el total de tareas hechas.
 - Los contadores son entradas del día natural; reiniciar es una entrada negativa. Los objetivos son `settings`.
 - Los puntos de los hábitos se calculan en el teléfono a partir de los checks sincronizados.
 - Se quedan solo en el teléfono: banca, `TaskScheduleStore` y Google Calendar, rituales diarios, notificación y gráficas.

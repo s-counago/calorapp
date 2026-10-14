@@ -22,7 +22,7 @@ import java.util.UUID;
  */
 final class PausaDb extends SQLiteOpenHelper {
     static final String NAME = "pausa.db";
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static PausaDb instance;
 
     private final Context context;
@@ -43,8 +43,9 @@ final class PausaDb extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE tasks (local_id INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, notes TEXT, "
                 + "status TEXT NOT NULL DEFAULT 'todo', project TEXT, area TEXT, priority INTEGER, due_date TEXT, plan_date TEXT, "
                 + "plan_slot TEXT, position REAL, completed_at INTEGER, source TEXT, source_id TEXT, created_at INTEGER NOT NULL, "
-                + "following INTEGER NOT NULL DEFAULT 0, waiting_for TEXT, expected_date TEXT, review_date TEXT, " + sync + ")");
+                + "following INTEGER NOT NULL DEFAULT 0, waiting_for TEXT, expected_date TEXT, review_date TEXT, board TEXT, " + sync + ")");
         db.execSQL("CREATE INDEX tasks_plan ON tasks (plan_date, plan_slot, position)");
+        db.execSQL("CREATE INDEX tasks_board ON tasks (board, status)");
         db.execSQL("CREATE TABLE habits (local_id INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, "
                 + "weekly_goal INTEGER NOT NULL DEFAULT 1, created_day TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, position REAL, " + sync + ")");
         db.execSQL("CREATE TABLE habit_checks (id TEXT PRIMARY KEY, habit_id TEXT NOT NULL, day TEXT NOT NULL, " + sync + ")");
@@ -64,7 +65,12 @@ final class PausaDb extends SQLiteOpenHelper {
     }
 
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // Future versions add ALTER TABLE steps here; never drop synced data.
+        // Each step adds what its version brought; never drop synced data.
+        if (oldVersion < 2) {
+            // Kanban column of a task (stack, priority, vault, failed), see backend migration 0004.
+            db.execSQL("ALTER TABLE tasks ADD COLUMN board TEXT");
+            db.execSQL("CREATE INDEX tasks_board ON tasks (board, status)");
+        }
     }
 
     static String uuid() {

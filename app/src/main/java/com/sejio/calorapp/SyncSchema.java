@@ -24,7 +24,7 @@ final class SyncSchema {
                 "priority", Type.INT, "due_date", Type.TEXT, "plan_date", Type.TEXT, "plan_slot", Type.TEXT,
                 "position", Type.REAL, "completed_at", Type.INT, "source", Type.TEXT, "source_id", Type.TEXT,
                 "created_at", Type.INT, "following", Type.BOOL, "waiting_for", Type.TEXT,
-                "expected_date", Type.TEXT, "review_date", Type.TEXT));
+                "expected_date", Type.TEXT, "review_date", Type.TEXT, "board", Type.TEXT));
         tables.put("habits", fields(
                 "name", Type.TEXT, "weekly_goal", Type.INT, "created_day", Type.TEXT, "archived", Type.BOOL, "position", Type.REAL));
         tables.put("habit_checks", fields("habit_id", Type.TEXT, "day", Type.TEXT));
