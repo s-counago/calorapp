@@ -58,6 +58,23 @@ public final class CloudSyncProbe extends Instrumentation {
                         out.append(file.getName()).append(' ');
                     }
                     break;
+                case "past":
+                    Activity main = startActivitySync(new android.content.Intent(context, MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+                    waitForIdleSync();
+                    runOnMainSync(() -> {
+                        try {
+                            java.lang.reflect.Field field = MainActivity.class.getDeclaredField("counterView");
+                            field.setAccessible(true);
+                            ((TodayView) field.get(main)).pastDaysSheet(DayPlanStore.day(-1));
+                        } catch (Exception e) { throw new RuntimeException(e); }
+                    });
+                    android.os.SystemClock.sleep(1200);
+                    java.io.File past = new java.io.File(context.getExternalFilesDir(null), "past-days.png");
+                    try (java.io.FileOutputStream stream = new java.io.FileOutputStream(past)) {
+                        getUiAutomation().takeScreenshot().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream);
+                    }
+                    out.append(past.getName()).append(' ');
+                    break;
                 case "sync":
                     out.append(PausaSync.SyncWorker.round(context, 0)).append(' ');
                     break;

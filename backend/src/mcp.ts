@@ -19,6 +19,7 @@ import {
   listTasks,
   localDay,
   logMetric,
+  setMetricTotal,
   setHabitCheck,
   updateTask,
   weeklyReview,
@@ -189,6 +190,24 @@ const TOOLS: Tool[] = [
       const target = dayArg(env, args.day);
       const id = await logMetric(env.DB, args.kind as MetricKind, args.amount, target);
       return { id, ...(await daySummary(env.DB, target)).counters };
+    },
+  },
+  {
+    name: 'set_counter',
+    title: 'Set a daily counter total',
+    description:
+      'Sets the total of calories (kcal), protein (g) or cigarettes for a day, e.g. to fix a past day the user forgot to log. ' +
+      'Adds the difference as a correction entry. Returns the previous total and the day counters.',
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: { kind: { type: 'string', enum: [...METRIC_KINDS] }, total: { type: 'number', minimum: 0 }, day },
+      required: ['kind', 'total'],
+    },
+    run: async (env, args) => {
+      const target = dayArg(env, args.day);
+      const result = await setMetricTotal(env.DB, args.kind as MetricKind, args.total as number, target);
+      return { day: target, previous: result.previous, ...(await daySummary(env.DB, target)).counters };
     },
   },
   {

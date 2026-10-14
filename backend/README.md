@@ -46,6 +46,7 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | `POST /api/tasks`, `PATCH/DELETE /api/tasks/<id>` | Crear, editar y borrar. |
 | `GET/POST /api/habits`, `POST /api/habits/<id>/check` | Hábitos de la semana y marcar un día (`{ "day", "done" }`). |
 | `POST /api/counters` | `{ "kind": "calories" \| "protein" \| "cigarettes", "amount", "day" }`. |
+| `PUT /api/counters` | `{ "kind", "total", "day" }`: fija el total de un día (añade la diferencia como corrección). Para días olvidados. |
 | `GET /api/day?day=` | Contadores frente a objetivos, plan por franjas y hábitos del día. |
 | `GET /api/review?day=` | Revisión de la semana (lunes a domingo) que contiene ese día. |
 | `GET /api/devices`, `DELETE /api/devices/<id>` | Dispositivos con sesión. |
@@ -57,7 +58,7 @@ Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
 
 ## MCP
 
-Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `day_summary` y `weekly_review`.
+Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `set_counter`, `day_summary` y `weekly_review`.
 
 Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 

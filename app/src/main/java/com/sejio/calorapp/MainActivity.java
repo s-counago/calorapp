@@ -409,6 +409,8 @@ public class MainActivity extends Activity implements TodayView.Host {
                 () -> { sheet.dismiss(); counterView.editProteinGoal(); }), 8);
         sheet.add(counterView.settingRow("Objetivo de cigarros", CalorieStore.getCigaretteGoal(this) + " al día",
                 () -> { sheet.dismiss(); counterView.editGoal(); }), 8);
+        sheet.add(counterView.settingRow("Contadores de días anteriores", "Corregir",
+                () -> { sheet.dismiss(); counterView.pastDaysSheet(DayPlanStore.day(-1)); }), 8);
         sheet.add(counterView.settingRow("Gráficas de hábitos", HabitStore.graphWeeks(this) + " semanas",
                 () -> { sheet.dismiss(); habitListView.chooseGraphWeeks(); }), 18);
         TextView signature = PausaUi.text(this, "Sejio · Pausa " + versionName() + "\nPequeños pasos. Una vida tuya.", 12, PausaUi.MUTED, false);

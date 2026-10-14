@@ -176,6 +176,20 @@ export async function logMetric(db: D1Database, kind: MetricKind, amount: number
   return id;
 }
 
+/**
+ * Sets the total of a counter for a day by adding the difference as one correction entry, so
+ * entries made elsewhere (another device, offline) still add up. Used to fix forgotten days.
+ */
+export async function setMetricTotal(db: D1Database, kind: MetricKind, total: number, day: string) {
+  if (!METRIC_KINDS.includes(kind)) throw new ValidationError(`kind must be one of ${METRIC_KINDS.join(', ')}`);
+  if (typeof total !== 'number' || !Number.isFinite(total) || total < 0) throw new ValidationError('total must be a number >= 0');
+  const current = (await metricTotals(db, day, day)).find((row) => row.kind === kind)?.total ?? 0;
+  const difference = total - current;
+  if (difference === 0) return { id: null, previous: current, total };
+  const id = await logMetric(db, kind, difference, day);
+  return { id, previous: current, total };
+}
+
 export async function goals(db: D1Database): Promise<Record<keyof typeof GOAL_DEFAULTS, number>> {
   const { results } = await db.prepare(`SELECT id, value FROM settings WHERE deleted = 0 AND id IN ('calorie_goal', 'protein_goal', 'cigarette_goal')`).all<{ id: string; value: string }>();
   const out: Record<string, number> = { ...GOAL_DEFAULTS };
