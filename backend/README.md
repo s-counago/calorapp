@@ -1,0 +1,84 @@
+# Backend de Pausa
+
+Un único Cloudflare Worker con D1 que sirve tres cosas:
+
+- **API de sincronización** para la app Android, que sigue funcionando sin conexión.
+- **Web** para usar Pausa desde el ordenador (`public/`, de momento solo un esqueleto).
+- **Servidor MCP** en `/mcp` para que Claude u otros agentes lean y editen los datos.
+
+Solo entra una cuenta de Google, la de `ALLOWED_EMAIL`. La banca no pasa por aquí: se queda cifrada en el móvil.
+
+## Datos
+
+| Tabla | Qué guarda |
+| --- | --- |
+| `tasks` | Tareas con proyecto, área, prioridad, fecha límite, día y franja del plan, y origen (`source`, `source_id`) para importar desde Notion. |
+| `habits`, `habit_checks` | Hábitos con objetivo semanal y una fila por día hecho (`<habit_id>:<día>`). |
+| `metric_entries` | Calorías, proteína y cigarros como entradas sueltas (+300 kcal a las 14:02), no como un total. |
+| `settings` | Objetivos diarios (`calorie_goal`, `protein_goal`, `cigarette_goal`). |
+| `devices` | Teléfonos con sesión iniciada; solo se guarda el hash del token. |
+
+## Sincronización
+
+Cada registro lleva `id`, `updated_at` (milisegundos, de quien hizo el cambio), `deleted` y `seq` (número de cambio en el servidor).
+
+1. El móvil guarda cada cambio en local y en una cola de pendientes.
+2. Con cobertura, envía la cola: `POST /api/sync` con `{ "changes": [{ "table", "id", "updated_at", "deleted", "data" }] }`. Siempre se manda el registro completo, también al borrar.
+3. Gana la edición más reciente de cada registro. La respuesta dice qué ids se aplicaron; los demás perdieron frente a un cambio más nuevo y llegarán en el siguiente paso.
+4. Después pide lo nuevo: `GET /api/sync?since=<cursor>` devuelve los cambios con `seq` mayor que el cursor, el cursor nuevo y `more: true` si hay que pedir otra página.
+
+Los contadores son entradas y no totales, así que sumar desde el móvil sin red y desde la web a la vez nunca se pisa.
+
+## Autenticación
+
+- **Web:** `/auth/login` lleva a Google y deja una cookie de sesión firmada durante 30 días.
+- **Android:** inicia sesión con Google en el teléfono (Credential Manager, con el client ID web como `serverClientId`) y envía el ID token a `POST /auth/device` con `{ "id_token", "name" }`. Recibe un token `pd_…` que no caduca y se manda como `Authorization: Bearer`. Se revoca con `DELETE /api/devices/<id>`.
+- **Agentes (MCP):** OAuth 2.1 con registro dinámico de clientes. La página de consentimiento usa la misma sesión de Google que la web.
+
+## API
+
+Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
+
+| Ruta | Uso |
+| --- | --- |
+| `GET/POST /api/sync` | Sincronización (ver arriba). |
+| `GET /api/tasks` | Filtros: `status`, `plan_date`, `project`, `due_before`, `search`, `limit`. |
+| `POST /api/tasks`, `PATCH/DELETE /api/tasks/<id>` | Crear, editar y borrar. |
+| `GET/POST /api/habits`, `POST /api/habits/<id>/check` | Hábitos de la semana y marcar un día (`{ "day", "done" }`). |
+| `POST /api/counters` | `{ "kind": "calories" \| "protein" \| "cigarettes", "amount", "day" }`. |
+| `GET /api/day?day=` | Contadores frente a objetivos, plan por franjas y hábitos del día. |
+| `GET /api/review?day=` | Revisión de la semana (lunes a domingo) que contiene ese día. |
+| `GET /api/devices`, `DELETE /api/devices/<id>` | Dispositivos con sesión. |
+
+Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
+
+## MCP
+
+Herramientas: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `day_summary` y `weekly_review`. Lo que haga un agente llega al móvil en la siguiente sincronización.
+
+Para conectarlo en Claude: Ajustes → Conectores → Añadir conector personalizado → `https://<tu-worker>/mcp`.
+
+## Desarrollo
+
+```sh
+npm install
+npm test          # tests en el runtime de Workers (Miniflare), con D1 local y Google simulado
+npm run typecheck
+cp .dev.vars.example .dev.vars   # y rellénalo
+npm run db:migrate:local
+npm run dev
+```
+
+## Despliegue
+
+1. `npx wrangler login`.
+2. `npx wrangler d1 create pausa` y `npx wrangler kv namespace create OAUTH_KV`. Copia los ids en `wrangler.jsonc`.
+3. `npm run db:migrate:remote`.
+4. En Google Cloud Console → APIs y servicios:
+   - Pantalla de consentimiento OAuth de tipo externo, con tu cuenta como usuario de prueba.
+   - Credencial **Aplicación web** con el URI de redirección `https://<tu-worker>/auth/callback` (y `http://localhost:8787/auth/callback` para desarrollo).
+   - Credencial **Android** con el paquete `com.sejio.calorapp` y la huella SHA-1 de la firma, para que el teléfono pueda pedir el ID token.
+5. Secretos, cada uno con `npx wrangler secret put <NOMBRE>`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAIL` y `SESSION_SECRET` (por ejemplo, `openssl rand -base64 32`).
+6. Pon la dirección final en `PUBLIC_URL` dentro de `wrangler.jsonc` y ejecuta `npm run deploy`.
+
+Todo cabe en el plan gratuito de Workers, D1 y KV para un solo usuario.

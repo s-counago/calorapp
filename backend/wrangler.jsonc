@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pausa",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": true },
+  "d1_databases": [
+    // Create with `npx wrangler d1 create pausa` and paste the id here.
+    { "binding": "DB", "database_name": "pausa", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+  ],
+  "kv_namespaces": [
+    // Create with `npx wrangler kv namespace create OAUTH_KV` and paste the id here.
+    { "binding": "OAUTH_KV", "id": "00000000000000000000000000000000" }
+  ],
+  "vars": {
+    "TIME_ZONE": "Europe/Madrid",
+    // The deployed address; change it if you use a custom domain.
+    "PUBLIC_URL": "https://pausa.example.workers.dev"
+  }
+  // Secrets (wrangler secret put): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ALLOWED_EMAIL, SESSION_SECRET.
+  // Optional: GOOGLE_ANDROID_AUDIENCES, comma-separated extra client IDs accepted in Android ID tokens.
+}

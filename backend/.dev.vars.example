@@ -1,0 +1,6 @@
+# Copy to .dev.vars for `npm run dev`. Never commit the real file.
+PUBLIC_URL=http://localhost:8787
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+ALLOWED_EMAIL=
+SESSION_SECRET=
