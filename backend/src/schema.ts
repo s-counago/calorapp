@@ -37,6 +37,7 @@ export const TABLES = {
       waiting_for: { type: 'text', max: 500 },
       expected_date: { type: 'day' },
       review_date: { type: 'day' },
+      board: { type: 'text', values: ['stack', 'priority', 'vault', 'failed'] },
     },
   },
   habits: {

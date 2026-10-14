@@ -122,6 +122,12 @@ describe('mcp', () => {
     expect(summary.structuredContent.habits).toEqual([expect.objectContaining({ name: 'Meditar', done: true })]);
     expect(summary.structuredContent.plan.evening.map((task: any) => task.id)).toEqual([taskId]);
 
+    const imported = await tool(token, 'import_tasks', { items: [{ title: 'Idea', board: 'stack', source: 'notion', source_id: 'p1' }] });
+    expect(imported.structuredContent).toMatchObject({ created: 1, skipped: 0 });
+    await tool(token, 'set_done_total', { total: 10 });
+    const board = await tool(token, 'board_summary');
+    expect(board.structuredContent).toEqual({ columns: { stack: 1, priority: 0, vault: 0, failed: 0 }, done_total: 10 });
+
     const bad = await tool(token, 'update_task', { id: 'missing', title: 'x' });
     expect(bad.isError).toBe(true);
     const unknown = await rpc(token, 'tools/call', { name: 'drop_database' });

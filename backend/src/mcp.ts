@@ -7,22 +7,28 @@ import { errorFields, log } from './log';
 import { recordHistory } from './sync';
 import type { Env } from './auth';
 import {
+  BOARD_COLUMNS,
+  MAX_IMPORT,
   METRIC_KINDS,
   NotFoundError,
   SLOTS,
+  boardSummary,
   createHabit,
   createTask,
   daySummary,
   deleteTask,
   getTask,
+  importTasks,
   listHabits,
   listTasks,
   localDay,
   logMetric,
+  setDoneTotal,
   setMetricTotal,
   setHabitCheck,
   updateTask,
   weeklyReview,
+  type ImportItem,
   type MetricKind,
 } from './domain';
 
@@ -45,6 +51,13 @@ const taskFields = {
   waiting_for: { type: 'string', description: 'Follow-ups only: who or what the task is waiting for.' },
   expected_date: { ...day, description: 'Follow-ups only: when the answer is expected (YYYY-MM-DD).' },
   review_date: { ...day, description: 'Follow-ups only: when to check on it again (YYYY-MM-DD).' },
+  board: {
+    type: ['string', 'null'],
+    enum: [...BOARD_COLUMNS, null],
+    description:
+      'Kanban column: stack (stack infinito, ideas and maybe-tasks), priority (prioridad real), vault (baúl) or failed (fracasos). ' +
+      'null for an ordinary task that is not on the board. Completing a board task adds one to the done total.',
+  },
 };
 
 interface Tool {
@@ -85,6 +98,7 @@ const TOOLS: Tool[] = [
         project: { type: 'string' },
         due_before: { ...day, description: 'Only tasks due on or before this day.' },
         following: { type: 'boolean', description: 'true for follow-ups only, false to leave them out.' },
+        board: { type: 'string', enum: [...BOARD_COLUMNS, 'none'], description: 'Only tasks in this Kanban column, or none for tasks off the board.' },
         search: { type: 'string', description: 'Text to find in the title or notes.' },
         limit: { type: 'integer', minimum: 1, maximum: 1000 },
       },
@@ -136,6 +150,54 @@ const TOOLS: Tool[] = [
       await deleteTask(env.DB, stringArg(args.id, 'id'));
       return { deleted: args.id };
     },
+  },
+  {
+    name: 'board_summary',
+    title: 'Board summary',
+    description: 'Open tasks in each Kanban column (stack, priority, vault, failed) and done_total, the running count of tasks Sejio has completed (including the old Notion count).',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {} },
+    run: (env) => boardSummary(env.DB),
+  },
+  {
+    name: 'set_done_total',
+    title: 'Set the done total',
+    description: 'Fixes the running count of completed tasks shown on the board. Later completions keep adding to it.',
+    readOnly: false,
+    inputSchema: { type: 'object', properties: { total: { type: 'integer', minimum: 0 } }, required: ['total'] },
+    run: (env, args) => setDoneTotal(env.DB, args.total as number),
+  },
+  {
+    name: 'import_tasks',
+    title: 'Import tasks',
+    description:
+      `Creates up to ${MAX_IMPORT} tasks at once from another tool, e.g. Notion. Each item needs source (e.g. notion) and source_id ` +
+      '(the id there); items already imported with the same source and source_id are skipped, so repeating an import is safe.',
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          maxItems: MAX_IMPORT,
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', maxLength: 500 },
+              notes: { type: 'string' },
+              board: taskFields.board,
+              status: taskFields.status,
+              source: { type: 'string' },
+              source_id: { type: 'string' },
+              created_at: { type: 'integer', description: 'Creation time in epoch milliseconds.' },
+            },
+            required: ['title', 'source', 'source_id'],
+          },
+        },
+      },
+      required: ['items'],
+    },
+    run: (env, args) => importTasks(env.DB, args.items as ImportItem[]),
   },
   {
     name: 'list_habits',
