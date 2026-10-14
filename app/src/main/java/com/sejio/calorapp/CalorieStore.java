@@ -94,8 +94,12 @@ final class CalorieStore {
         log(context, "protein", -getProtein(context));
     }
 
+    /** The day closes at 03:00, as in the backend: a snack at 01:30 still counts for the previous day. */
+    static final int DAY_START_HOUR = 3;
+
     static String today() {
-        return new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(new Date());
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT)
+                .format(new Date(System.currentTimeMillis() - DAY_START_HOUR * 3_600_000L));
     }
 
     static int total(Context context, String kind) {
