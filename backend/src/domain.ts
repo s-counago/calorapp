@@ -592,12 +592,13 @@ async function metricTotals(db: D1Database, from: string, to: string) {
 // Summaries -----------------------------------------------------------------------
 
 export async function daySummary(db: D1Database, day: string) {
-  const [totals, goal, plan, habits, health] = await Promise.all([
+  const [totals, goal, plan, habits, health, note] = await Promise.all([
     metricTotals(db, day, day),
     goals(db),
     listTasks(db, { plan_date: day }),
     listHabits(db, day),
     healthDays(db, day, day),
+    getFocusNote(db, day),
   ]);
   const total = (kind: MetricKind) => totals.find((row) => row.kind === kind)?.total ?? 0;
   return {
@@ -610,6 +611,7 @@ export async function daySummary(db: D1Database, day: string) {
     plan: Object.fromEntries([...SLOTS, null].map((slot) => [slot ?? 'unslotted', plan.filter((task) => (task.plan_slot ?? null) === slot)])),
     habits: habits.map((habit) => ({ id: habit.id, name: habit.name, done: habit.done_today })),
     health: health[0] ?? null,
+    note: note?.active ? { text: note.text, until: note.until } : null,
   };
 }
 
@@ -793,6 +795,205 @@ export async function budgetSummary(db: D1Database, day?: string) {
   return { cycle, cycles: cycles.map((item: Record<string, unknown>) => ({ start: item.start, end: item.end, current: item.current, available: item.available, saved: item.saved, savings_at_close: item.savings_at_close })) };
 }
 
+// Captures (el cajón) -------------------------------------------------------------
+
+export const CAPTURE_STATUSES = ['new', 'kept', 'filed', 'archived'] as const;
+export const CAPTURE_KINDS = ['note', 'idea', 'link', 'task', 'other'] as const;
+const URL_IN_TEXT = /https?:\/\/[^\s<>"]+/i;
+
+export interface Capture extends Record<string, unknown> {
+  id: string;
+  text: string;
+  status: string;
+}
+
+function captureFromRow(row: Row): Capture {
+  const record = toRecord('captures', row);
+  let suggestion: unknown = null;
+  try { suggestion = typeof record.suggestion === 'string' ? JSON.parse(record.suggestion) : null; } catch { suggestion = null; }
+  return { id: String(row.id), ...record, suggestion, updated_at: Number(row.updated_at) } as unknown as Capture;
+}
+
+export async function getCapture(db: D1Database, id: string): Promise<Capture> {
+  const row = await getRow(db, 'captures', id);
+  if (!row || row.deleted === 1) throw new NotFoundError(`No capture ${id}`);
+  return captureFromRow(row);
+}
+
+/** Drops something into the cajón. A link inside the text becomes `url` when none is given. */
+export async function createCapture(db: D1Database, input: { text?: unknown; url?: unknown; title?: unknown; source?: unknown; id?: unknown }) {
+  const text = typeof input.text === 'string' ? input.text.trim() : '';
+  const url = typeof input.url === 'string' && input.url ? input.url : (URL_IN_TEXT.exec(text)?.[0] ?? null);
+  if (!text && !url) throw new ValidationError('text or url is required');
+  const id = typeof input.id === 'string' ? input.id : crypto.randomUUID();
+  await save(db, 'captures', id, {
+    text: text || url,
+    url,
+    title: typeof input.title === 'string' ? input.title : null,
+    source: typeof input.source === 'string' ? input.source : null,
+    status: 'new',
+    kind: url && (!text || text === url) ? 'link' : null,
+    created_at: Date.now(),
+  });
+  return getCapture(db, id);
+}
+
+export interface CaptureFilter {
+  status?: string;
+  kind?: string;
+  tag?: string;
+  search?: string;
+  /** Only captures without an agent suggestion yet. */
+  unsuggested?: boolean;
+  limit?: number;
+}
+
+/** Captures, newest first. Defaults to the ones still waiting (status new). */
+export async function listCaptures(db: D1Database, filter: CaptureFilter = {}) {
+  const where = ['deleted = 0'];
+  const params: (string | number)[] = [];
+  const status = filter.status ?? 'new';
+  if (status !== 'all') {
+    if (!(CAPTURE_STATUSES as readonly string[]).includes(status)) throw new ValidationError(`status must be all or one of ${CAPTURE_STATUSES.join(', ')}`);
+    where.push('status = ?'); params.push(status);
+  }
+  if (filter.kind) { where.push('kind = ?'); params.push(filter.kind); }
+  if (filter.tag) { where.push("(',' || tags || ',') LIKE ?"); params.push(`%,${filter.tag.replace(/[%_,]/g, '')},%`); }
+  if (filter.unsuggested) where.push('suggestion IS NULL');
+  if (filter.search) {
+    where.push("(text LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR url LIKE ? ESCAPE '\\')");
+    const like = `%${filter.search.replace(/[\\%_]/g, '\\$&')}%`;
+    params.push(like, like, like);
+  }
+  const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
+  const { results } = await db.prepare(`SELECT * FROM captures WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT ${limit}`).bind(...params).all<Row>();
+  const waiting = await db.prepare(`SELECT COUNT(*) AS n FROM captures WHERE deleted = 0 AND status = 'new'`).first<{ n: number }>();
+  return { waiting: waiting?.n ?? 0, items: results.map(captureFromRow) };
+}
+
+function cleanTags(tags: unknown): string | null {
+  if (tags === undefined || tags === null) return null;
+  const list = (Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(',') : null);
+  if (!list) throw new ValidationError('tags must be a list of words');
+  const clean = [...new Set(list.map((tag) => String(tag).trim().toLowerCase().replace(/,/g, '')).filter(Boolean))];
+  return clean.length ? clean.join(',') : null;
+}
+
+/**
+ * What an agent thinks a capture is. It is only stored next to the capture; nothing moves until
+ * Sejio (or an agent he asked) files it. `lane` and `day` describe the task it would become.
+ */
+export async function suggestCapture(db: D1Database, id: string, suggestion: Record<string, unknown>) {
+  const capture = await getCapture(db, id);
+  if (!suggestion || typeof suggestion !== 'object') throw new ValidationError('suggestion must be an object');
+  const kind = suggestion.kind;
+  if (!(CAPTURE_KINDS as readonly string[]).includes(String(kind))) throw new ValidationError(`kind must be one of ${CAPTURE_KINDS.join(', ')}`);
+  if (suggestion.lane !== undefined && suggestion.lane !== null && !(LANES as readonly string[]).includes(String(suggestion.lane))) {
+    throw new ValidationError(`lane must be one of ${LANES.join(', ')}`);
+  }
+  const clean = {
+    kind,
+    title: typeof suggestion.title === 'string' ? suggestion.title.slice(0, 500) : null,
+    lane: suggestion.lane ?? null,
+    day: typeof suggestion.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(suggestion.day) ? suggestion.day : null,
+    tags: cleanTags(suggestion.tags)?.split(',') ?? [],
+    reason: typeof suggestion.reason === 'string' ? suggestion.reason.slice(0, 500) : null,
+  };
+  await save(db, 'captures', id, { ...capture, suggestion: JSON.stringify(clean) });
+  return getCapture(db, id);
+}
+
+export interface FileCapture {
+  /** task: becomes a task; keep: stays in the library as a note, idea or link; archive: done with it. */
+  as: 'task' | 'keep' | 'archive';
+  title?: string;
+  lane?: string;
+  day?: string | null;
+  kind?: string;
+  tags?: unknown;
+}
+
+/** Decides what a capture is. Filing it as a task creates the task (its notes keep the text and link). */
+export async function fileCapture(db: D1Database, id: string, decision: FileCapture) {
+  const capture = await getCapture(db, id);
+  if (!decision || typeof decision !== 'object') throw new ValidationError('Expected { as: task | keep | archive }');
+  if (decision.as === 'task') {
+    const title = (typeof decision.title === 'string' && decision.title.trim()) || String(capture.title ?? capture.text).split('\n')[0].slice(0, 500);
+    const notes = [capture.text !== title ? capture.text : null, capture.url && !String(capture.text).includes(String(capture.url)) ? capture.url : null].filter(Boolean).join('\n\n') || null;
+    const task = await createTask(db, {
+      title,
+      notes,
+      lane: decision.lane ?? 'inbox',
+      plan_date: decision.day ?? undefined,
+      source: 'capture',
+      source_id: id,
+    });
+    await save(db, 'captures', id, { ...capture, suggestion: capture.suggestion ? JSON.stringify(capture.suggestion) : null, status: 'filed', kind: 'task', task_id: task.id, tags: cleanTags(decision.tags) ?? capture.tags ?? null });
+    return { capture: await getCapture(db, id), task };
+  }
+  if (decision.as === 'keep' || decision.as === 'archive') {
+    const kind = decision.kind ?? capture.kind ?? null;
+    if (kind !== null && !(CAPTURE_KINDS as readonly string[]).includes(String(kind))) throw new ValidationError(`kind must be one of ${CAPTURE_KINDS.join(', ')}`);
+    await save(db, 'captures', id, {
+      ...capture,
+      suggestion: capture.suggestion ? JSON.stringify(capture.suggestion) : null,
+      status: decision.as === 'keep' ? 'kept' : 'archived',
+      kind,
+      title: typeof decision.title === 'string' ? decision.title : capture.title ?? null,
+      tags: decision.tags === undefined ? capture.tags ?? null : cleanTags(decision.tags),
+    });
+    return { capture: await getCapture(db, id), task: null };
+  }
+  throw new ValidationError('as must be task, keep or archive');
+}
+
+export async function deleteCapture(db: D1Database, id: string) {
+  const capture = await getCapture(db, id);
+  await save(db, 'captures', id, { ...capture, suggestion: capture.suggestion ? JSON.stringify(capture.suggestion) : null }, true);
+}
+
+// Focus note ----------------------------------------------------------------------
+
+/**
+ * One short note that Sejio wants in sight for the next few days ("esta semana, solo lo de
+ * Prioridad"). Stored as the synced setting `focus_note` holding JSON { text, until }, so older
+ * phones simply ignore it. Past `until` (inclusive) it stops showing but is kept.
+ */
+export const FOCUS_NOTE_SETTING = 'focus_note';
+export const MAX_NOTE = 280;
+
+export interface FocusNote {
+  text: string;
+  /** Last day it shows (YYYY-MM-DD), or null to keep it until it is changed. */
+  until: string | null;
+  updated_at: number;
+}
+
+export async function getFocusNote(db: D1Database, today: string): Promise<(FocusNote & { active: boolean }) | null> {
+  const row = await db.prepare(`SELECT value, updated_at FROM settings WHERE id = ? AND deleted = 0`).bind(FOCUS_NOTE_SETTING).first<{ value: string; updated_at: number }>();
+  if (!row) return null;
+  let parsed: { text?: unknown; until?: unknown };
+  try { parsed = JSON.parse(row.value); } catch { return null; }
+  if (typeof parsed.text !== 'string' || !parsed.text) return null;
+  const until = typeof parsed.until === 'string' ? parsed.until : null;
+  return { text: parsed.text, until, updated_at: Number(row.updated_at), active: until === null || until >= today };
+}
+
+/** Sets the note, or clears it with an empty or null text. */
+export async function setFocusNote(db: D1Database, text: unknown, until: unknown, today: string) {
+  if (text === null || text === undefined || (typeof text === 'string' && !text.trim())) {
+    await save(db, 'settings', FOCUS_NOTE_SETTING, { value: '{}' }, true);
+    return null;
+  }
+  if (typeof text !== 'string') throw new ValidationError('text must be text');
+  if (text.trim().length > MAX_NOTE) throw new ValidationError(`text must be at most ${MAX_NOTE} characters`);
+  if (until !== undefined && until !== null && (typeof until !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(until))) {
+    throw new ValidationError('until must be YYYY-MM-DD or null');
+  }
+  await save(db, 'settings', FOCUS_NOTE_SETTING, { value: JSON.stringify({ text: text.trim(), until: until ?? null }) });
+  return getFocusNote(db, today);
+}
+
 // Features ------------------------------------------------------------------------
 
 /**
@@ -812,6 +1013,24 @@ export const FEATURES = [
     key: 'task_kanban',
     title: 'Tablero Kanban en Tareas',
     description: 'Un segmento Kanban en Tareas con stack infinito, prioridad, baúl y fracasos, y el contador de tareas hechas.',
+    default: false,
+  },
+  {
+    key: 'habit_tasks',
+    title: 'Hábito → tarea',
+    description: 'Un botón en cada hábito para ponerlo como tarea de hoy o de mañana, con un evento de día completo en Google Calendar.',
+    default: false,
+  },
+  {
+    key: 'captures',
+    title: 'Cajón',
+    description: 'Un sitio donde volcar enlaces, ideas y notas en dos toques (también desde Compartir), para ordenarlos luego.',
+    default: false,
+  },
+  {
+    key: 'focus_note',
+    title: 'Nota en Hoy',
+    description: 'Una frase o un plan para los próximos días, en una línea discreta bajo el saludo de Hoy.',
     default: false,
   },
   {

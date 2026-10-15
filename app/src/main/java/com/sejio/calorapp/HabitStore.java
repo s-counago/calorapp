@@ -156,6 +156,7 @@ final class HabitStore {
             else habit.completedDays.remove(day);
             rebuildWeekRewards(habit, week, day);
             save(context, habits);
+            completeLinkedTasks(context, habit.uid, day, done);
         }
         int pointChange = totalPoints(habit) - before;
         boolean minimumReached = !minimumAlreadyReached && habit.baseRewards.containsKey(week);
@@ -407,6 +408,18 @@ final class HabitStore {
             for (String day : habit.completedDays) if (!stored.contains(day)) putCheck(db, habit.uid, day, true);
             for (String day : stored) if (!habit.completedDays.contains(day)) putCheck(db, habit.uid, day, false);
             saveScore(db, habit);
+        }
+    }
+
+    /** Tasks made from this habit for `day` follow its mark, as setHabitCheck does in the backend. */
+    private static void completeLinkedTasks(Context context, String habitId, String day, boolean done) {
+        PausaDb db = PausaDb.get(context);
+        for (Map<String, Object> row : db.rows("SELECT id FROM tasks WHERE deleted = 0 AND habit_id = ? AND plan_date = ? AND status = ?",
+                habitId, day, done ? "todo" : "done")) {
+            Map<String, Object> data = new HashMap<>();
+            data.put("status", done ? "done" : "todo");
+            data.put("completed_at", done ? System.currentTimeMillis() : null);
+            db.put("tasks", (String) row.get("id"), data, false);
         }
     }
 

@@ -68,7 +68,7 @@ public final class SyncSchemaTest {
     }
 
     @Test public void tablesMatchTheBackendContract() {
-        assertEquals("[tasks, habits, habit_checks, metric_entries, settings, health_days]", SyncSchema.TABLES.keySet().toString());
+        assertEquals("[tasks, habits, habit_checks, metric_entries, settings, health_days, budget_cycles]", SyncSchema.TABLES.keySet().toString());
         assertEquals("[day, kind, amount, at]", SyncSchema.TABLES.get("metric_entries").keySet().toString());
     }
 }

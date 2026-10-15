@@ -43,7 +43,8 @@ final class PausaDb extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE tasks (local_id INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, notes TEXT, "
                 + "status TEXT NOT NULL DEFAULT 'todo', project TEXT, area TEXT, priority INTEGER, due_date TEXT, plan_date TEXT, "
                 + "plan_slot TEXT, position REAL, completed_at INTEGER, source TEXT, source_id TEXT, created_at INTEGER NOT NULL, "
-                + "following INTEGER NOT NULL DEFAULT 0, waiting_for TEXT, expected_date TEXT, review_date TEXT, board TEXT, " + sync + ")");
+                + "following INTEGER NOT NULL DEFAULT 0, waiting_for TEXT, expected_date TEXT, review_date TEXT, board TEXT, "
+                + "plan_time INTEGER, plan_minutes INTEGER, habit_id TEXT, " + sync + ")");
         db.execSQL("CREATE INDEX tasks_plan ON tasks (plan_date, plan_slot, position)");
         db.execSQL("CREATE INDEX tasks_board ON tasks (board, status)");
         db.execSQL("CREATE TABLE habits (local_id INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, "
@@ -74,11 +75,16 @@ final class PausaDb extends SQLiteOpenHelper {
             db.execSQL("CREATE INDEX tasks_board ON tasks (board, status)");
         }
         if (oldVersion < 3) createHealthDays(db);
-        // 4 is left to the task-lanes columns of the redesign; IF NOT EXISTS keeps both orders safe.
+        if (oldVersion < 4) {
+            // Optional time and length on the planned day, and the habit a task was made from (backend migration 0007).
+            db.execSQL("ALTER TABLE tasks ADD COLUMN plan_time INTEGER");
+            db.execSQL("ALTER TABLE tasks ADD COLUMN plan_minutes INTEGER");
+            db.execSQL("ALTER TABLE tasks ADD COLUMN habit_id TEXT");
+        }
         if (oldVersion < 5) createBudgetCycles(db);
     }
 
-    /** Money summary per payday cycle, see backend migration 0008 and BudgetCloud. */
+    /** Money summary per payday cycle, see backend migration 0009 and BudgetCloud. */
     private static void createBudgetCycles(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS budget_cycles (id TEXT PRIMARY KEY, start TEXT NOT NULL, \"end\" TEXT NOT NULL, "
                 + "current INTEGER NOT NULL DEFAULT 0, income INTEGER, fixed INTEGER, saved INTEGER, savings_target INTEGER, "

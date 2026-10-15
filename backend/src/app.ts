@@ -50,6 +50,14 @@ import {
   planTask,
   habitToTask,
   tasksOverview,
+  getFocusNote,
+  createCapture,
+  listCaptures,
+  getCapture,
+  suggestCapture,
+  fileCapture,
+  deleteCapture,
+  setFocusNote,
   addDays,
   currentDay,
   logMetric,
@@ -385,6 +393,33 @@ app.put('/api/counters', async (c) => {
 
 app.get('/api/goals', async (c) => c.json(await goals(c.env.DB)));
 app.put('/api/goals', async (c) => c.json(await setGoals(c.env.DB, await c.req.json())));
+app.get('/api/captures', async (c) => {
+  const query = c.req.query();
+  return c.json(
+    await listCaptures(c.env.DB, {
+      status: query.status,
+      kind: query.kind,
+      tag: query.tag,
+      search: query.search,
+      unsuggested: query.unsuggested === 'true',
+      limit: query.limit ? Number(query.limit) : undefined,
+    }),
+  );
+});
+app.post('/api/captures', async (c) => c.json(await createCapture(c.env.DB, { ...(await c.req.json()), source: c.req.query('source') ?? 'web' }), 201));
+app.get('/api/captures/:id', async (c) => c.json(await getCapture(c.env.DB, c.req.param('id'))));
+app.post('/api/captures/:id/suggest', async (c) => c.json(await suggestCapture(c.env.DB, c.req.param('id'), await c.req.json())));
+app.post('/api/captures/:id/file', async (c) => c.json(await fileCapture(c.env.DB, c.req.param('id'), await c.req.json())));
+app.delete('/api/captures/:id', async (c) => {
+  await deleteCapture(c.env.DB, c.req.param('id'));
+  return c.body(null, 204);
+});
+
+app.get('/api/note', async (c) => c.json({ note: await getFocusNote(c.env.DB, today(c)) }));
+app.put('/api/note', async (c) => {
+  const body = await c.req.json<{ text?: unknown; until?: unknown }>();
+  return c.json({ note: await setFocusNote(c.env.DB, body.text, body.until, today(c)) });
+});
 
 app.get('/api/day', async (c) => c.json(await daySummary(c.env.DB, dayQuery(c))));
 app.get('/api/review', async (c) =>

@@ -193,10 +193,14 @@ final class HabitListView extends LinearLayout {
         name.setContentDescription("Editar hábito: " + habit.name);
         name.setOnClickListener(v -> showHabitDialog(habit));
         titleRow.addView(name, new LayoutParams(0, -2, 1));
+        if (Features.isOn(c, Features.HABIT_TASKS)) {
+            titleRow.addView(PausaUi.iconButton(c, "calendar", "Poner " + habit.name + " como tarea", PausaUi.GREEN,
+                    () -> showHabitTaskSheet(habit)), new LayoutParams(dp(48), dp(48)));
+        }
         PausaUi.Check mark = new PausaUi.Check(c, PausaUi.SAGE);
         mark.setDiameter(34);
         mark.setChecked(HabitStore.isDoneToday(habit));
-        mark.setContentDescription(habit.name + ", marcar para hoy");
+        mark.setContentDescription(habit.name + (HabitStore.isDoneToday(habit) ? ", hecho hoy. Desmarcar" : ", marcar para hoy"));
         mark.setListener(checked -> onMark(habit, checked));
         titleRow.addView(mark, new LayoutParams(dp(60), dp(60)));
         card.addView(titleRow, full());
@@ -249,6 +253,27 @@ final class HabitListView extends LinearLayout {
         chartParams.topMargin = dp(6);
         card.addView(chartRow, chartParams);
         return card;
+    }
+
+    /** Two taps: the calendar button, then Hoy or Mañana. The task joins that day's plan and Google Calendar. */
+    private void showHabitTaskSheet(HabitStore.Habit habit) {
+        Context c = getContext();
+        PausaUi.Sheet sheet = new PausaUi.Sheet(c, habit.name);
+        sheet.subtitle("Como tarea del día, sin hora. Al completarla se marca el hábito.");
+        LinearLayout days = new LinearLayout(c);
+        String[] labels = {"Hoy", "Mañana"};
+        for (int offset = 0; offset < 2; offset++) {
+            final int day = offset;
+            LayoutParams p = new LayoutParams(0, dp(52), 1);
+            if (offset == 1) p.leftMargin = dp(10);
+            days.addView(PausaUi.action(c, labels[offset], offset == 0, () -> {
+                TaskStore.addFromHabit(c, habit, DayPlanStore.day(day));
+                sheet.dialog.dismiss();
+                PausaUi.snack(c, habit.name + (day == 0 ? " · tarea de hoy" : " · tarea de mañana"), null, null);
+            }), p);
+        }
+        sheet.add(days, 4);
+        sheet.show();
     }
 
     private void onMark(HabitStore.Habit habit, boolean checked) {

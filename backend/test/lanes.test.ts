@@ -83,3 +83,21 @@ describe('lanes and appointments', () => {
     expect(typeof overview.done_total).toBe('number');
   });
 });
+
+describe('focus note', () => {
+  it('keeps one note with an optional last day, shows it in the day summary and clears it', async () => {
+    const token = await deviceToken();
+    const put = (body: unknown) => json('/api/note', token, { method: 'PUT', body: JSON.stringify(body) });
+    expect(((await (await json('/api/note', token)).json()) as any).note).toBeNull();
+
+    const set = (await (await put({ text: '  Esta semana, solo lo de Prioridad  ', until: '2026-10-19' })).json()) as any;
+    expect(set.note).toMatchObject({ text: 'Esta semana, solo lo de Prioridad', until: '2026-10-19' });
+    expect(((await (await json('/api/day?day=2026-10-19', token)).json()) as any).note).toEqual({ text: 'Esta semana, solo lo de Prioridad', until: '2026-10-19' });
+    expect(((await (await json('/api/day?day=2026-10-20', token)).json()) as any).note).toBeNull();
+
+    expect((await put({ text: 'x'.repeat(281) })).status).toBe(400);
+    expect((await put({ text: 'Hola', until: 'mañana' })).status).toBe(400);
+    expect(((await (await put({ text: '' })).json()) as any).note).toBeNull();
+    expect(((await (await json('/api/note', token)).json()) as any).note).toBeNull();
+  });
+});
