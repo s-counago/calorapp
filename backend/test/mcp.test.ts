@@ -122,6 +122,14 @@ describe('mcp', () => {
     expect(summary.structuredContent.habits).toEqual([expect.objectContaining({ name: 'Meditar', done: true })]);
     expect(summary.structuredContent.plan.evening.map((task: any) => task.id)).toEqual([taskId]);
 
+    const month = await tool(token, 'weekly_review', { day: '2026-10-14', period: 'month' });
+    expect(month.structuredContent).toMatchObject({ period: 'month', start: '2026-10-01', end: '2026-10-31' });
+
+    const features = await tool(token, 'list_features');
+    expect(features.structuredContent.items).toEqual([expect.objectContaining({ key: 'review_zoom', enabled: false })]);
+    const switched = await tool(token, 'set_feature', { key: 'review_zoom', enabled: true });
+    expect(switched.structuredContent).toMatchObject({ key: 'review_zoom', enabled: true });
+
     const bad = await tool(token, 'update_task', { id: 'missing', title: 'x' });
     expect(bad.isError).toBe(true);
     const unknown = await rpc(token, 'tools/call', { name: 'drop_database' });

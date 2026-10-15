@@ -238,19 +238,45 @@ export async function daySummary(db: D1Database, day: string) {
   };
 }
 
+export const REVIEW_PERIODS = ['week', 'month'] as const;
+export type ReviewPeriod = (typeof REVIEW_PERIODS)[number];
+
+/** First and last day of the Monday-to-Sunday week or the calendar month that contains `day`. */
+export function periodRange(day: string, period: ReviewPeriod): { start: string; end: string } {
+  if (period === 'week') {
+    const start = weekStart(day);
+    return { start, end: addDays(start, 6) };
+  }
+  const start = `${day.slice(0, 7)}-01`;
+  const next = new Date(`${start}T00:00:00Z`);
+  next.setUTCMonth(next.getUTCMonth() + 1);
+  return { start, end: addDays(next.toISOString().slice(0, 10), -1) };
+}
+
 export async function weeklyReview(db: D1Database, anyDay: string, timeZone: string) {
-  const start = weekStart(anyDay);
-  const end = addDays(start, 6);
-  const from = dayStartMillis(start, timeZone);
-  const to = dayStartMillis(addDays(end, 1), timeZone);
-  const [done, open, totals, goal, habits] = await Promise.all([
+  return review(db, anyDay, timeZone, 'week');
+}
+
+/**
+ * Review of the week or month that contains `anyDay`: tasks completed and still pending,
+ * habits against their weekly goal (scaled to the length of the period) and counter averages.
+ */
+export async function review(db: D1Database, anyDay: string, timeZone: string, period: ReviewPeriod = 'week') {
+  if (!REVIEW_PERIODS.includes(period)) throw new ValidationError(`period must be one of ${REVIEW_PERIODS.join(', ')}`);
+  const { start, end } = periodRange(anyDay, period);
+  // Days close at 03:00, so the period runs from 03:00 on its first day to 03:00 after its last.
+  const from = dayStartMillis(start, timeZone) + DAY_START_HOUR * 3600_000;
+  const to = dayStartMillis(addDays(end, 1), timeZone) + DAY_START_HOUR * 3600_000;
+  const [done, open, totals, goal, habits, checks] = await Promise.all([
     db.prepare(`SELECT * FROM tasks WHERE deleted = 0 AND status = 'done' AND completed_at >= ? AND completed_at < ? ORDER BY completed_at`).bind(from, to).all<Row>(),
     db.prepare(`SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND ((due_date IS NOT NULL AND due_date <= ?) OR (plan_date IS NOT NULL AND plan_date <= ?)) ORDER BY due_date, plan_date`).bind(end, end).all<Row>(),
     metricTotals(db, start, end),
     goals(db),
-    listHabits(db, start),
+    db.prepare(`SELECT * FROM habits WHERE deleted = 0 AND archived = 0 ORDER BY position, name`).all<Row>(),
+    db.prepare(`SELECT habit_id, day FROM habit_checks WHERE deleted = 0 AND day BETWEEN ? AND ?`).bind(start, end).all<{ habit_id: string; day: string }>(),
   ]);
-  const days = Array.from({ length: 7 }, (_, index) => addDays(start, index));
+  const length = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1;
+  const days = Array.from({ length }, (_, index) => addDays(start, index));
   const perDay = days.map((day) => {
     const value = (kind: MetricKind) => totals.find((row) => row.day === day && row.kind === kind)?.total ?? 0;
     return { day, calories: value('calories'), protein: value('protein'), cigarettes: value('cigarettes') };
@@ -259,19 +285,20 @@ export async function weeklyReview(db: D1Database, anyDay: string, timeZone: str
   const average = (key: 'calories' | 'protein' | 'cigarettes') =>
     logged.length ? Math.round(logged.reduce((sum, row) => sum + row[key], 0) / logged.length) : null;
   return {
-    week_start: start,
-    week_end: end,
+    period,
+    ...(period === 'week' ? { week_start: start, week_end: end } : {}),
+    start,
+    end,
     tasks: {
       completed: done.results.map(taskFromRow),
       pending_due_or_planned: open.results.map(taskFromRow),
     },
-    habits: habits.map((habit) => ({
-      id: habit.id,
-      name: habit.name,
-      weekly_goal: habit.weekly_goal,
-      days_done: habit.week_days_done.length,
-      met: habit.week_days_done.length >= Number(habit.weekly_goal),
-    })),
+    habits: habits.results.map((row) => {
+      const weeklyGoal = Number(row.weekly_goal);
+      const target = Math.max(1, Math.round((weeklyGoal * length) / 7));
+      const daysDone = new Set(checks.results.filter((check) => check.habit_id === row.id).map((check) => check.day)).size;
+      return { id: String(row.id), name: String(row.name), weekly_goal: weeklyGoal, target, days_done: daysDone, met: daysDone >= target };
+    }),
     counters: {
       days_logged: logged.length,
       average: { calories: average('calories'), protein: average('protein'), cigarettes: average('cigarettes') },
@@ -281,4 +308,41 @@ export async function weeklyReview(db: D1Database, anyDay: string, timeZone: str
       per_day: perDay,
     },
   };
+}
+
+// Features ------------------------------------------------------------------------
+
+/**
+ * Parts of the apps that Sejio can switch on or off from Ajustes → Funciones (or an agent with
+ * set_feature). Each one is stored as the synced setting `feature:<key>` with value "on" or "off",
+ * so the phone sees the change on its next pull. Android keeps the same list in `Features.java`:
+ * add a feature to both places, with a default that keeps the app as it was.
+ */
+export const FEATURES = [
+  {
+    key: 'review_zoom',
+    title: 'Resumen Día · Semana · Mes',
+    description: 'Un selector encima de Hoy para alejarte del día y ver la semana o el mes: salud, hábitos, tareas y dinero.',
+    default: false,
+  },
+] as const;
+export type FeatureKey = (typeof FEATURES)[number]['key'];
+
+export function featureSettingId(key: string) {
+  return `feature:${key}`;
+}
+
+export async function listFeatures(db: D1Database) {
+  const { results } = await db.prepare(`SELECT id, value FROM settings WHERE deleted = 0 AND id LIKE 'feature:%'`).all<{ id: string; value: string }>();
+  return FEATURES.map((feature) => {
+    const stored = results.find((row) => row.id === featureSettingId(feature.key))?.value;
+    return { ...feature, enabled: stored === 'on' ? true : stored === 'off' ? false : feature.default };
+  });
+}
+
+export async function setFeature(db: D1Database, key: string, enabled: boolean) {
+  if (!FEATURES.some((feature) => feature.key === key)) throw new ValidationError(`Unknown feature. Use one of ${FEATURES.map((feature) => feature.key).join(', ')}`);
+  if (typeof enabled !== 'boolean') throw new ValidationError('enabled must be true or false');
+  await save(db, 'settings', featureSettingId(key), { value: enabled ? 'on' : 'off' });
+  return (await listFeatures(db)).find((feature) => feature.key === key)!;
 }
