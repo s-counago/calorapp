@@ -195,6 +195,11 @@ export function empty(message, detail) {
 export const SLOT_LABELS = { morning: 'Mañana', afternoon: 'Tarde', evening: 'Noche' };
 export const SLOT_ICONS = { morning: '☀', afternoon: '◐', evening: '☾' };
 export const BOARD_LABELS = { stack: 'Stack infinito', priority: 'Prioridad', vault: 'Baúl', failed: 'Fracasos' };
+/** Lanes of the task model, in the order the board shows them. */
+export const LANE_LABELS = { inbox: 'Bandeja', priority: 'Prioridad', stack: 'Stack infinito', waiting: 'Esperando', vault: 'Baúl', failed: 'Fracasos' };
+
+/** Minutes after midnight as HH:MM. */
+export const clock = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 
 /** The slot of the day it is now, with the phone's boundaries: before 12, before 20, after. */
 export function currentSlot() {

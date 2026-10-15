@@ -103,6 +103,10 @@ export const Pausa = {
   createTask: (task) => api('/api/tasks', { method: 'POST', body: task }),
   updateTask: (id, patch) => api(`/api/tasks/${id}`, { method: 'PATCH', body: patch }),
   deleteTask: (id) => api(`/api/tasks/${id}`, { method: 'DELETE' }),
+  overview: (day) => api(`/api/tasks/overview?day=${day}`),
+  moveTask: (id, lane) => api(`/api/tasks/${id}/move`, { method: 'POST', body: { lane } }),
+  planTask: (id, appointment) => api(`/api/tasks/${id}/plan`, { method: 'POST', body: appointment }),
+  habitToTask: (id, day) => api(`/api/habits/${id}/task`, { method: 'POST', body: { day } }),
   board: () => api('/api/board'),
   setDoneTotal: (total) => api('/api/board/done', { method: 'PUT', body: { total } }),
 

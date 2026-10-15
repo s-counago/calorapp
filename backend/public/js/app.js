@@ -18,9 +18,9 @@ import { renderSettings } from './views/settings.js';
 const VIEWS = [
   { path: 'hoy', label: 'Hoy', render: renderToday },
   { path: 'semana', label: 'Semana', render: renderWeek },
-  { path: 'tareas', label: 'Lista', render: renderList, group: 'Tareas' },
-  { path: 'tablero', label: 'Tablero', render: renderBoard, feature: 'task_kanban', group: 'Tareas' },
-  { path: 'seguimientos', label: 'Seguimientos', render: renderFollowups, group: 'Tareas' },
+  { path: 'tareas', label: 'Bandeja', render: renderList, group: 'Tareas' },
+  { path: 'tablero', label: 'Carriles', render: renderBoard, feature: 'task_kanban', group: 'Tareas' },
+  { path: 'seguimientos', label: 'Esperando', render: renderFollowups, group: 'Tareas' },
   { path: 'habitos', label: 'Hábitos', render: renderHabits },
   { path: 'resumen', label: 'Resumen', render: renderReview, feature: 'review_zoom' },
   { path: 'salud', label: 'Salud', render: renderHealth, feature: 'health_connect' },
@@ -97,7 +97,7 @@ function capture() {
       } else {
         const created = await attempt(() => Pausa.createTask({ title: text }));
         if (!created) return;
-        toast(`«${text}» a tu lista`, { undo: async () => { await attempt(() => Pausa.deleteTask(created.id)); refresh(); } });
+        toast(`«${text}» a la bandeja`, { undo: async () => { await attempt(() => Pausa.deleteTask(created.id)); refresh(); } });
       }
       input.value = '';
       refresh();

@@ -2,10 +2,36 @@
 // the editor and the quick-add form.
 
 import { Pausa } from './api.js';
-import { state, isOn } from './state.js';
-import { BOARD_LABELS, SLOT_LABELS, addDays, attempt, confirmDialog, dateTime, dayMonth, dialog, h, relativeDay, toast } from './ui.js';
+import { state } from './state.js';
+import { LANE_LABELS, SLOT_LABELS, addDays, attempt, clock, confirmDialog, dateTime, dayMonth, dialog, h, relativeDay, toast } from './ui.js';
 
 export const isOpen = (task) => task.status === 'todo';
+export const laneOf = (task) => task.lane ?? (task.following ? 'waiting' : task.board ?? 'inbox');
+
+/** Order inside a day: set times first, then the phone's position, then creation. */
+export const byPlan = (a, b) => (a.plan_time ?? 1e9) - (b.plan_time ?? 1e9) || (a.position ?? 1e9) - (b.position ?? 1e9) || a.created_at - b.created_at;
+
+const APPOINTMENT = ['plan_date', 'plan_slot', 'plan_time', 'plan_minutes', 'position'];
+
+/** Plans a task on a day and slot (or takes it off with day null), with undo. A set time is dropped. */
+export async function planOn(task, day, slot = null, message) {
+  const before = Object.fromEntries(APPOINTMENT.map((key) => [key, task[key] ?? null]));
+  const updated = await attempt(() => Pausa.planTask(task.id, { day, slot }));
+  if (!updated) return null;
+  const text = message ?? (day ? `Planificada ${relativeDay(day, state.today).toLowerCase()}${slot ? ` · ${SLOT_LABELS[slot].toLowerCase()}` : ''}` : 'Quitada del plan');
+  toast(text, { undo: async () => { await attempt(() => Pausa.updateTask(task.id, before)); state.refresh(); } });
+  state.refresh();
+  return updated;
+}
+
+/** Moves a task to another lane, with undo. Its day, if any, stays. */
+export async function moveTo(task, lane) {
+  const previous = laneOf(task);
+  if (previous === lane) return;
+  if (!(await attempt(() => Pausa.moveTask(task.id, lane)))) return;
+  toast(`Movida a ${LANE_LABELS[lane].toLowerCase()}`, { undo: async () => { await attempt(() => Pausa.moveTask(task.id, previous)); state.refresh(); } });
+  state.refresh();
+}
 
 /** Marks a task done or not, with undo. */
 export async function toggleDone(task) {
@@ -46,16 +72,19 @@ export async function removeTask(task) {
   state.refresh();
 }
 
-/** Small labels after the title: when it is planned, due, its column, who it waits for. */
+/** Small labels after the title: when it is planned, its time, when it is due, its lane, who it waits for. */
 function chips(task, { hide = [] } = {}) {
   const list = [];
+  const lane = laneOf(task);
   if (task.plan_date && !hide.includes('plan')) {
     const overdue = isOpen(task) && task.plan_date < state.today;
-    list.push(h('span.chip', { class: overdue ? 'warn' : '' }, relativeDay(task.plan_date, state.today, 'short') + (task.plan_slot ? ` · ${SLOT_LABELS[task.plan_slot].toLowerCase()}` : '')));
+    list.push(h('span.chip', { class: overdue ? 'warn' : '' }, relativeDay(task.plan_date, state.today, 'short') + (task.plan_slot && task.plan_time === null ? ` · ${SLOT_LABELS[task.plan_slot].toLowerCase()}` : '')));
   }
+  if (task.plan_time !== null && task.plan_time !== undefined) list.push(h('span.chip.time', clock(task.plan_time) + (task.plan_minutes ? ` · ${task.plan_minutes} min` : '')));
+  else if (task.plan_minutes) list.push(h('span.chip.soft', `${task.plan_minutes} min`));
   if (task.due_date) list.push(h('span.chip', { class: isOpen(task) && task.due_date <= state.today ? 'warn' : '' }, `vence ${dayMonth(task.due_date)}`));
-  if (task.board && !hide.includes('board')) list.push(h('span.chip.soft', BOARD_LABELS[task.board]));
-  if (task.following && !hide.includes('following')) list.push(h('span.chip.soft', task.waiting_for ? `esperando: ${task.waiting_for}` : 'en seguimiento'));
+  if (lane !== 'inbox' && !hide.includes('lane')) list.push(h('span.chip.soft', { class: `lane-${lane}` }, lane === 'waiting' && task.waiting_for ? `esperando: ${task.waiting_for}` : LANE_LABELS[lane]));
+  if (task.habit_id) list.push(h('span.chip.soft', 'hábito'));
   if (task.project) list.push(h('span.chip.soft', task.project));
   if (task.area) list.push(h('span.chip.soft', task.area));
   if (task.priority) list.push(h('span.chip.soft', `P${task.priority}`));
@@ -109,22 +138,23 @@ export function popover(anchor, items) {
 function taskMenu(task, anchor) {
   const today = state.today;
   const tomorrow = addDays(today, 1);
-  const plan = (day) => patchTask(task, { plan_date: day, following: false }, `Planificada ${relativeDay(day, today).toLowerCase()}`);
+  const lane = laneOf(task);
   popover(anchor, [
-    task.plan_date !== today && { label: 'Planificar hoy', run: () => plan(today) },
-    task.plan_date !== tomorrow && { label: 'Planificar mañana', run: () => plan(tomorrow) },
-    task.plan_date && { label: 'Quitar del plan', run: () => patchTask(task, { plan_date: null, plan_slot: null, position: null }, 'Quitada del plan') },
+    task.plan_date !== today && { label: 'Planificar hoy', run: () => planOn(task, today) },
+    task.plan_date !== tomorrow && { label: 'Planificar mañana', run: () => planOn(task, tomorrow) },
+    task.plan_date && { label: 'Quitar del plan', run: () => planOn(task, null) },
     '-',
-    isOn('task_kanban') && { label: task.board ? 'Mover a la lista' : 'Mover al tablero', run: () => patchTask(task, { board: task.board ? null : 'stack' }, task.board ? 'Movida a la lista' : 'Movida al stack') },
-    !task.following && { label: 'Pasar a seguimiento', run: () => patchTask(task, { following: true, plan_date: null, plan_slot: null }, 'En seguimiento') },
-    task.following && { label: 'Ahora me toca a mí', run: () => patchTask(task, { following: false }, 'Vuelve a pendientes') },
-    task.status === 'todo' && { label: 'Abandonar', run: () => patchTask(task, { status: 'cancelled' }, 'Abandonada') },
-    task.status === 'cancelled' && { label: 'Recuperar', run: () => patchTask(task, { status: 'todo' }, 'Pendiente otra vez') },
+    { label: 'Mover a…', run: () => laneMenu(task, anchor) },
+    lane !== 'failed' && task.status === 'todo' && { label: 'Abandonar (a fracasos)', run: () => moveTo(task, 'failed') },
     '-',
     { label: 'Editar…', run: () => editTask(task) },
     { label: 'Historial de cambios…', run: () => showHistory('tasks', task.id, task.title) },
     { label: 'Eliminar', danger: true, run: () => removeTask(task) },
   ]);
+}
+
+export function laneMenu(task, anchor) {
+  setTimeout(() => popover(anchor, Object.entries(LANE_LABELS).filter(([key]) => key !== laneOf(task)).map(([key, label]) => ({ label, run: () => moveTo(task, key) }))), 0);
 }
 
 /** Every saved version of a record and who wrote it: phone, web or agent. */
@@ -155,17 +185,15 @@ export function editTask(task, defaults = {}) {
     const slot = h('select', h('option', { value: '' }, 'Sin franja'), Object.entries(SLOT_LABELS).map(([key, label]) => h('option', { value: key, selected: value.plan_slot === key }, label)));
     const quick = (label, day) => h('button.pill', { type: 'button', onclick: () => { planDate.value = day ?? ''; } }, label);
     const due = h('input', { type: 'date', value: value.due_date ?? '' });
-    const board = h('select',
-      h('option', { value: '' }, 'Lista'),
-      Object.entries(BOARD_LABELS).map(([key, label]) => h('option', { value: key, selected: value.board === key }, label)),
-    );
-    const following = h('input', { type: 'checkbox', checked: !!value.following });
+    const lane = h('select', Object.entries(LANE_LABELS).map(([key, label]) => h('option', { value: key, selected: (value.lane ?? laneOf(value)) === key }, label)));
+    const at = h('input', { type: 'time', value: value.plan_time === null || value.plan_time === undefined ? '' : clock(value.plan_time) });
+    const length = h('input', { type: 'number', min: 1, max: 1440, value: value.plan_minutes ?? '', placeholder: 'min' });
     const waitingFor = h('input', { value: value.waiting_for ?? '', placeholder: 'De quién o de qué depende' });
     const expected = h('input', { type: 'date', value: value.expected_date ?? '' });
     const review = h('input', { type: 'date', value: value.review_date ?? '' });
     const followBox = h('div.follow-fields', field('Esperando a', waitingFor), h('div.grid-2', field('Fecha prevista', expected), field('Volver a revisar', review)));
-    const syncFollow = () => { followBox.hidden = !following.checked; };
-    following.addEventListener('change', syncFollow);
+    const syncFollow = () => { followBox.hidden = lane.value !== 'waiting'; };
+    lane.addEventListener('change', syncFollow);
     syncFollow();
     const project = h('input', { value: value.project ?? '', placeholder: 'Proyecto' });
     const area = h('input', { value: value.area ?? '', placeholder: 'salud, casa, trabajo…' });
@@ -176,23 +204,28 @@ export function editTask(task, defaults = {}) {
     const submit = async (event) => {
       event.preventDefault();
       if (!title.value.trim()) { error.textContent = 'Escribe una tarea.'; return; }
+      const waiting = lane.value === 'waiting';
+      const time = planDate.value && at.value ? at.value : null;
+      const slotForTime = (text) => { const minutes = Number(text.slice(0, 2)) * 60 + Number(text.slice(3, 5)); return minutes < 720 ? 'morning' : minutes < 1200 ? 'afternoon' : 'evening'; };
       const data = {
         title: title.value.trim(),
         notes: notes.value.trim() || null,
         plan_date: planDate.value || null,
-        plan_slot: planDate.value ? slot.value || null : null,
+        plan_slot: planDate.value ? slot.value || (time ? slotForTime(time) : null) : null,
+        plan_time: time,
+        plan_minutes: planDate.value && length.value ? Number(length.value) : null,
         due_date: due.value || null,
-        board: board.value || null,
-        following: following.checked,
-        waiting_for: following.checked ? waitingFor.value.trim() || null : null,
-        expected_date: following.checked ? expected.value || null : null,
-        review_date: following.checked ? review.value || null : null,
+        lane: lane.value,
+        waiting_for: waiting ? waitingFor.value.trim() || null : null,
+        expected_date: waiting ? expected.value || null : null,
+        review_date: waiting ? review.value || null : null,
         project: project.value.trim() || null,
         area: area.value.trim() || null,
         priority: priority.value ? Number(priority.value) : null,
         status: status.value,
       };
       if (!planDate.value) data.position = null;
+      if (data.plan_minutes !== null && !(data.plan_minutes >= 1 && data.plan_minutes <= 1440)) { error.textContent = 'La duración va de 1 a 1440 minutos.'; return; }
       const saved = await attempt(() => (isNew ? Pausa.createTask(data) : Pausa.updateTask(task.id, data)));
       if (!saved) return;
       toast(isNew ? 'Tarea añadida' : 'Tarea guardada');
@@ -207,12 +240,12 @@ export function editTask(task, defaults = {}) {
         h('legend', 'Cuándo'),
         h('div.pills', quick('Hoy', state.today), quick('Mañana', addDays(state.today, 1)), quick('Sin día', null)),
         h('div.grid-2', field('Día', planDate), field('Franja', slot)),
+        h('div.grid-2', field('Hora (opcional)', at), field('Duración en minutos', length)),
         field('Fecha límite', due),
       ),
       h('fieldset',
         h('legend', 'Dónde'),
-        h('div.grid-2', isOn('task_kanban') || value.board ? field('Columna', board) : null, field('Estado', status)),
-        h('label.check-field', following, h('span', 'En seguimiento: espera a otra persona y no entra en el plan')),
+        h('div.grid-2', field('Carril', lane), field('Estado', status)),
         followBox,
       ),
       h('details', h('summary', 'Más detalles'), h('div.grid-3', field('Proyecto', project), field('Área', area), field('Prioridad', priority))),

@@ -269,3 +269,8 @@ table.data td { border-bottom: 1px solid var(--line); padding: .35rem .4rem; ver
 .switch-row { display: flex; justify-content: space-between; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--line); cursor: pointer; }
 .switch-row:last-child { border-bottom: 0; }
 .switch-row input { width: 2.6rem; height: 1.4rem; accent-color: var(--green); flex: none; }
+.habit-checks li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.link.small { font-size: .8rem; }
+.chip.time { background: var(--sun-soft); color: #8a5d0c; }
+.chip.lane-priority { background: var(--peach-soft); color: var(--terracotta); }
+.board { grid-template-columns: repeat(6, minmax(15rem, 1fr)); }

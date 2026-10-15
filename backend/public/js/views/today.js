@@ -3,7 +3,7 @@
 
 import { Pausa } from '../api.js';
 import { state, isOn } from '../state.js';
-import { dropTarget, editTask, isOpen, patchTask, quickAdd, taskRow } from '../tasks.js';
+import { byPlan, dropTarget, editTask, isOpen, moveTo, planOn, quickAdd, taskRow } from '../tasks.js';
 import { SLOT_ICONS, SLOT_LABELS, addDays, askNumber, attempt, currentSlot, dialog, empty, h, longDay, number, relativeDay, time, toast, fill } from '../ui.js';
 import { healthLine } from './health.js';
 
@@ -15,10 +15,11 @@ const KINDS = {
 
 export async function renderToday(root, day) {
   day ??= state.today;
-  const [summary, entries, tomorrow] = await Promise.all([
+  const [summary, entries, tomorrow, overview] = await Promise.all([
     Pausa.day(day),
     Pausa.entries(day),
     day === state.today ? Pausa.tasks({ plan_date: addDays(day, 1), status: 'todo' }) : Promise.resolve(null),
+    day === state.today ? Pausa.overview(day) : Promise.resolve(null),
   ]);
   const isToday = day === state.today;
   fill(root, 
@@ -37,7 +38,7 @@ export async function renderToday(root, day) {
     !isToday && day < state.today ? h('p.notice', 'Estás corrigiendo un día pasado: lo que apuntes se guarda en ese día.') : null,
     h('div.today-grid',
       h('section.column', h('h2.section-title', 'Contadores'), Object.keys(KINDS).map((kind) => counterCard(kind, summary.counters[kind], day, entries))),
-      h('section.column', planBlock(summary.plan, day, isToday)),
+      h('section.column', overview ? leftOverBlock(overview.left_over) : null, planBlock(summary.plan, day, isToday)),
       h('section.column',
         habitsBlock(summary.habits, day),
         isOn('health_connect') ? h('div.card', h('h2.section-title', 'Salud del reloj'), healthLine(summary.health, { full: true }), h('a.link', { href: '#/salud' }, 'Ver la evolución')) : null,
@@ -136,14 +137,14 @@ function planBlock(plan, day, isToday) {
   const all = Object.values(plan).flatMap(visible);
   const done = all.filter((task) => task.status === 'done').length;
   const sections = [...Object.keys(SLOT_LABELS), 'unslotted'].map((slot) => {
-    const tasks = visible(plan[slot] ?? []).sort((a, b) => (a.position ?? 1e9) - (b.position ?? 1e9) || a.created_at - b.created_at);
+    const tasks = visible(plan[slot] ?? []).sort(byPlan);
     if (slot === 'unslotted' && !tasks.length) return null;
     const section = h('div.slot', { class: slot === now ? 'now' : '' },
-      h('h3.slot-title', slot === 'unslotted' ? 'Sin franja' : [h('span.slot-icon', SLOT_ICONS[slot]), SLOT_LABELS[slot]], slot === now ? h('span.chip', 'Ahora') : null),
+      h('h3.slot-title', slot === 'unslotted' ? 'A cualquier hora' : [h('span.slot-icon', SLOT_ICONS[slot]), SLOT_LABELS[slot]], slot === now ? h('span.chip', 'Ahora') : null),
       tasks.length ? tasks.map((task) => taskRow(task, { hide: ['plan'], actions: [slotMover(task, slot)] })) : h('p.slot-empty', 'Libre'),
       slot !== 'unslotted' ? quickAdd(`Añadir por la ${SLOT_LABELS[slot].toLowerCase()}`, { plan_date: day, plan_slot: slot }) : null,
     );
-    return dropTarget(section, (task) => patchTask(task, { plan_date: day, plan_slot: slot === 'unslotted' ? null : slot, following: false }, `Movida a ${slot === 'unslotted' ? 'sin franja' : SLOT_LABELS[slot].toLowerCase()}`));
+    return dropTarget(section, (task) => planOn(task, day, slot === 'unslotted' ? null : slot));
   });
   return h('div',
     h('div.section-row', h('h2.section-title', 'Tu día'), all.length ? h('span.muted', `${done} de ${all.length} hechas`) : null, h('span.spacer'), h('button.pill', { onclick: () => pickFromList(day) }, 'Añadir de tu lista')),
@@ -156,17 +157,17 @@ function slotMover(task, slot) {
   const order = ['morning', 'afternoon', 'evening'];
   const index = order.indexOf(slot);
   return [
-    index > 0 ? h('button.icon-button', { title: `A la ${SLOT_LABELS[order[index - 1]].toLowerCase()}`, onclick: () => patchTask(task, { plan_slot: order[index - 1] }) }, '↑') : null,
-    index >= 0 && index < 2 ? h('button.icon-button', { title: `A la ${SLOT_LABELS[order[index + 1]].toLowerCase()}`, onclick: () => patchTask(task, { plan_slot: order[index + 1] }) }, '↓') : null,
-    h('button.icon-button', { title: 'Quitar del plan', onclick: () => patchTask(task, { plan_date: null, plan_slot: null, position: null }, 'Quitada del plan') }, '×'),
+    index > 0 ? h('button.icon-button', { title: `A la ${SLOT_LABELS[order[index - 1]].toLowerCase()}`, onclick: () => planOn(task, task.plan_date, order[index - 1]) }, '↑') : null,
+    index >= 0 && index < 2 ? h('button.icon-button', { title: `A la ${SLOT_LABELS[order[index + 1]].toLowerCase()}`, onclick: () => planOn(task, task.plan_date, order[index + 1]) }, '↓') : null,
+    h('button.icon-button', { title: 'Quitar del plan', onclick: () => planOn(task, null) }, '×'),
   ];
 }
 
 /** Like the phone's «Añadir tareas»: pick open tasks from the list (and Prioridad) to plan them on this day. */
 async function pickFromList(day) {
   const [list, priority] = await Promise.all([
-    attempt(() => Pausa.tasks({ status: 'todo', board: 'none', following: false })),
-    isOn('task_kanban') ? attempt(() => Pausa.tasks({ status: 'todo', board: 'priority' })) : Promise.resolve([]),
+    attempt(() => Pausa.tasks({ status: 'todo', lane: 'inbox' })),
+    attempt(() => Pausa.tasks({ status: 'todo', lane: 'priority' })),
   ]);
   if (!list) return;
   const candidates = [...list, ...(priority ?? [])].filter((task) => task.plan_date !== day);
@@ -180,13 +181,13 @@ async function pickFromList(day) {
       listBox.replaceChildren(...(shown.length ? shown.map((task) =>
         h('button.pick', { onclick: async (event) => {
           const button = event.currentTarget;
-          if (await attempt(() => Pausa.updateTask(task.id, { plan_date: day, plan_slot: slot.value }))) {
+          if (await attempt(() => Pausa.planTask(task.id, { day, slot: slot.value }))) {
             button.classList.add('picked');
             button.disabled = true;
             candidates.splice(candidates.indexOf(task), 1);
             state.refresh();
           }
-        } }, h('span', task.title), task.board ? h('span.chip.soft', 'Prioridad') : task.plan_date ? h('span.chip', relativeDay(task.plan_date, state.today, 'short')) : null),
+        } }, h('span', task.title), task.lane === 'priority' ? h('span.chip.soft', 'Prioridad') : task.plan_date ? h('span.chip', relativeDay(task.plan_date, state.today, 'short')) : null),
       ) : [empty('Todo listo. Puedes crear una tarea arriba.')]));
     };
     search.addEventListener('input', draw);
@@ -196,11 +197,24 @@ async function pickFromList(day) {
   }, { wide: true });
 }
 
+/** «Quedó atrás»: open tasks planned on an earlier day, so nothing rots on a past date unnoticed. */
+function leftOverBlock(tasks) {
+  if (!tasks.length) return null;
+  return h('div.card.warn-card',
+    h('h2.section-title', `Quedó atrás (${tasks.length})`),
+    tasks.map((task) => taskRow(task, { actions: [
+      h('button.pill', { onclick: () => planOn(task, state.today, task.plan_slot ?? null, 'A hoy') }, 'A hoy'),
+      h('button.pill', { title: 'Quita el día y la deja en su carril', onclick: () => planOn(task, null, null, 'De vuelta a su carril') }, 'A su carril'),
+      h('button.pill', { onclick: () => moveTo(task, 'failed') }, 'Abandonar'),
+    ] })),
+  );
+}
+
 function tomorrowBlock(tasks, day) {
   const open = tasks.filter((task) => isOpen(task) && !task.following);
   return h('div.card',
     h('div.section-row', h('h2.section-title', 'Mañana'), h('span.spacer'), h('a.link', { href: `#/hoy/${addDays(day, 1)}` }, 'Abrir')),
-    open.length ? h('ul.compact', open.map((task) => h('li', h('button.link', { onclick: () => editTask(task) }, task.title), task.plan_slot ? h('span.muted', ` · ${SLOT_LABELS[task.plan_slot].toLowerCase()}`) : null)))
+    open.length ? h('ul.compact', open.sort(byPlan).map((task) => h('li', h('button.link', { onclick: () => editTask(task) }, task.title), task.plan_slot ? h('span.muted', ` · ${SLOT_LABELS[task.plan_slot].toLowerCase()}`) : null)))
       : h('p.muted', 'Prepara mañana con calma.'),
     quickAdd('Añadir a mañana', { plan_date: addDays(day, 1) }),
   );
@@ -220,7 +234,10 @@ function habitsBlock(habits, day) {
             toast(done ? `«${habit.name}» hecho` : 'Marca deshecha', { undo: async () => { await attempt(() => Pausa.checkHabit(habit.id, day, !done)); state.refresh(); } });
             state.refresh();
           } }),
-          h('span', habit.name)))))
+          h('span', habit.name)),
+          habit.done ? null : h('button.link.small', { title: 'Lo pone en tu plan de hoy; al completarla se marca el hábito', onclick: async () => {
+            if (await attempt(() => Pausa.habitToTask(habit.id, day))) { toast(`«${habit.name}» en tu plan`); state.refresh(); }
+          } }, 'Al plan'))))
       : h('p.muted', 'Aún no tienes hábitos.'),
   );
 }

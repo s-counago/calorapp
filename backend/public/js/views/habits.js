@@ -64,6 +64,8 @@ function habitCard(habit, days, done, isThisWeek) {
     h('header',
       h('div', h('h3', habit.name), h('p.muted', `Mínimo ${habit.weekly_goal} ${habit.weekly_goal === 1 ? 'día' : 'días'} por semana`)),
       h('button.icon-button', { 'aria-label': 'Más acciones', onclick: (event) => popover(event.currentTarget, [
+        { label: 'Ponerlo en el plan de hoy', run: () => toPlan(habit, state.today) },
+        { label: 'Ponerlo en el plan de mañana', run: () => toPlan(habit, addDays(state.today, 1)) },
         { label: 'Editar…', run: () => habitEditor(habit) },
         { label: 'Archivar', run: () => archive(habit) },
         { label: 'Historial de cambios…', run: () => showHistory('habits', habit.id, habit.name) },
@@ -127,6 +129,12 @@ function habitEditor(habit) {
       h('div.actions', h('button.ghost', { type: 'button', onclick: () => close() }, 'Cancelar'), h('button.primary', { type: 'submit' }, habit ? 'Guardar' : 'Crear')),
     );
   });
+}
+
+/** Makes a task from the habit on that day; completing the task checks the habit. */
+async function toPlan(habit, day) {
+  const task = await attempt(() => Pausa.habitToTask(habit.id, day));
+  if (task) toast(`«${habit.name}» en el plan de ${day === state.today ? 'hoy' : 'mañana'}. Al completarla se marca el hábito.`);
 }
 
 async function archive(habit) {
