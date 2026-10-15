@@ -40,6 +40,19 @@ import {
   importTasks,
   listHabits,
   listTasks,
+  moveTask,
+  planTask,
+  habitToTask,
+  tasksOverview,
+  getFocusNote,
+  createCapture,
+  listCaptures,
+  getCapture,
+  suggestCapture,
+  fileCapture,
+  deleteCapture,
+  setFocusNote,
+  addDays,
   currentDay,
   logMetric,
   setDoneTotal,
@@ -296,6 +309,7 @@ app.get('/api/tasks', async (c) => {
       due_before: query.due_before,
       following: query.following === undefined ? undefined : query.following === 'true',
       board: query.board,
+      lane: query.lane,
       search: query.search,
       limit: query.limit ? Number(query.limit) : undefined,
     }),
@@ -310,6 +324,12 @@ app.put('/api/board/done', async (c) => {
   const body = await c.req.json<{ total?: unknown }>();
   return c.json(await setDoneTotal(c.env.DB, body.total as number));
 });
+app.get('/api/tasks/overview', async (c) => c.json(await tasksOverview(c.env.DB, dayQuery(c))));
+app.post('/api/tasks/:id/move', async (c) => {
+  const body = await c.req.json<{ lane?: unknown }>();
+  return c.json(await moveTask(c.env.DB, c.req.param('id'), body.lane));
+});
+app.post('/api/tasks/:id/plan', async (c) => c.json(await planTask(c.env.DB, c.req.param('id'), await c.req.json())));
 app.get('/api/tasks/:id', async (c) => c.json(await getTask(c.env.DB, c.req.param('id'))));
 app.post('/api/tasks', async (c) => c.json(await createTask(c.env.DB, await c.req.json()), 201));
 app.patch('/api/tasks/:id', async (c) => c.json(await updateTask(c.env.DB, c.req.param('id'), await c.req.json())));
@@ -332,6 +352,13 @@ app.post('/api/habits/:id/check', async (c) => {
   return c.json({ ok: true });
 });
 
+app.post('/api/habits/:id/task', async (c) => {
+  const body = await c.req.json<{ day?: unknown }>().catch(() => ({}) as { day?: unknown });
+  const day = body.day === undefined || body.day === 'today' ? today(c) : body.day === 'tomorrow' ? addDays(today(c), 1) : body.day;
+  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ValidationError('day must be today, tomorrow or YYYY-MM-DD');
+  return c.json(await habitToTask(c.env.DB, c.req.param('id'), day), 201);
+});
+
 app.post('/api/counters', async (c) => {
   const body = await c.req.json<{ kind?: MetricKind; amount?: unknown; day?: string }>();
   if (typeof body.amount !== 'number' || !Number.isFinite(body.amount)) throw new ValidationError('amount must be a number');
@@ -344,6 +371,34 @@ app.put('/api/counters', async (c) => {
   const body = await c.req.json<{ kind?: MetricKind; total?: unknown; day?: string }>();
   const day = body.day ?? today(c);
   return c.json(await setMetricTotal(c.env.DB, body.kind as MetricKind, body.total as number, day));
+});
+
+app.get('/api/captures', async (c) => {
+  const query = c.req.query();
+  return c.json(
+    await listCaptures(c.env.DB, {
+      status: query.status,
+      kind: query.kind,
+      tag: query.tag,
+      search: query.search,
+      unsuggested: query.unsuggested === 'true',
+      limit: query.limit ? Number(query.limit) : undefined,
+    }),
+  );
+});
+app.post('/api/captures', async (c) => c.json(await createCapture(c.env.DB, { ...(await c.req.json()), source: c.req.query('source') ?? 'web' }), 201));
+app.get('/api/captures/:id', async (c) => c.json(await getCapture(c.env.DB, c.req.param('id'))));
+app.post('/api/captures/:id/suggest', async (c) => c.json(await suggestCapture(c.env.DB, c.req.param('id'), await c.req.json())));
+app.post('/api/captures/:id/file', async (c) => c.json(await fileCapture(c.env.DB, c.req.param('id'), await c.req.json())));
+app.delete('/api/captures/:id', async (c) => {
+  await deleteCapture(c.env.DB, c.req.param('id'));
+  return c.body(null, 204);
+});
+
+app.get('/api/note', async (c) => c.json({ note: await getFocusNote(c.env.DB, today(c)) }));
+app.put('/api/note', async (c) => {
+  const body = await c.req.json<{ text?: unknown; until?: unknown }>();
+  return c.json({ note: await setFocusNote(c.env.DB, body.text, body.until, today(c)) });
 });
 
 app.get('/api/day', async (c) => c.json(await daySummary(c.env.DB, dayQuery(c))));

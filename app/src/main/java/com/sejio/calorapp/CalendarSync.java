@@ -15,6 +15,7 @@ import com.google.android.gms.tasks.Tasks;
 import org.json.JSONObject;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -123,6 +124,33 @@ final class CalendarSync {
                 String fingerprint = ByteString.encodeUtf8(body.toString()).sha256().hex();
                 if (fingerprint.equals(prior)) continue;
                 if (!p.edit().putBoolean("attempted." + row.id, true).commit()) throw new IllegalStateException();
+                api.upsert(calendar, body);
+                if (!p.edit().putString(key, fingerprint).commit()) throw new IllegalStateException();
+            }
+            // Tasks made from a habit (feature habit_tasks) go in as all-day events on their day.
+            for (Map<String, Object> row : PausaDb.get(c).rows("SELECT id, title, plan_date, status, deleted FROM tasks WHERE habit_id IS NOT NULL")) {
+                if (Thread.currentThread().isInterrupted() || !enabled(c) || !account.equals(p.getString("account", ""))) return false;
+                String uid = (String) row.get("id");
+                String key = "synced.task." + uid;
+                String prior = p.getString(key, "");
+                String remote = p.getString("event.task." + uid, CalendarEvent.idFor(uid));
+                boolean removed = Long.valueOf(1).equals(row.get("deleted")) || row.get("plan_date") == null || "cancelled".equals(row.get("status"));
+                if (removed) {
+                    if (prior.equals("deleted") || prior.isEmpty()) {
+                        if (prior.isEmpty() && !p.edit().putString(key, "deleted").commit()) throw new IllegalStateException();
+                        continue;
+                    }
+                    api.delete(calendar, remote);
+                    if (!p.edit().putString(key, "deleted").commit()) throw new IllegalStateException();
+                    continue;
+                }
+                if (prior.equals("deleted")) {
+                    remote = UUID.randomUUID().toString().replace("-", "");
+                    if (!p.edit().putString("event.task." + uid, remote).putString(key, "").commit()) throw new IllegalStateException();
+                }
+                JSONObject body = CalendarEvent.allDay(remote, (String) row.get("title"), (String) row.get("plan_date"));
+                String fingerprint = ByteString.encodeUtf8(body.toString()).sha256().hex();
+                if (fingerprint.equals(p.getString(key, ""))) continue;
                 api.upsert(calendar, body);
                 if (!p.edit().putString(key, fingerprint).commit()) throw new IllegalStateException();
             }

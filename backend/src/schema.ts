@@ -38,6 +38,12 @@ export const TABLES = {
       expected_date: { type: 'day' },
       review_date: { type: 'day' },
       board: { type: 'text', values: ['stack', 'priority', 'vault', 'failed'] },
+      /** Minutes after local midnight on plan_date (0–1439), for a task with a set time. */
+      plan_time: { type: 'int' },
+      /** How long the task takes, in minutes (1–1440). */
+      plan_minutes: { type: 'int' },
+      /** The habit this task was made from; completing the task checks the habit on plan_date. */
+      habit_id: { type: 'text', max: 100 },
     },
   },
   habits: {
@@ -66,6 +72,21 @@ export const TABLES = {
   settings: {
     fields: {
       value: { type: 'text', required: true, max: 5000 },
+    },
+  },
+  /** El cajón: raw captures from the phone (see migration 0008). */
+  captures: {
+    fields: {
+      text: { type: 'text', required: true, max: 20000 },
+      url: { type: 'text', max: 2000 },
+      title: { type: 'text', max: 500 },
+      source: { type: 'text', max: 50 },
+      status: { type: 'text', values: ['new', 'kept', 'filed', 'archived'], default: 'new' },
+      kind: { type: 'text', values: ['note', 'idea', 'link', 'task', 'other'] },
+      tags: { type: 'text', max: 500 },
+      task_id: { type: 'text', max: 100 },
+      suggestion: { type: 'text', max: 5000 },
+      created_at: { type: 'int', required: true },
     },
   },
   /** One row per day, id = the day. Written by the phone from Health Connect. */
@@ -135,6 +156,12 @@ export function validateRecord(table: TableName, data: Record<string, unknown>):
   }
   if (table === 'habits' && (Number(row.weekly_goal) < 1 || Number(row.weekly_goal) > 7)) {
     throw new ValidationError('habits.weekly_goal must be between 1 and 7');
+  }
+  if (table === 'tasks' && row.plan_time !== null && (Number(row.plan_time) < 0 || Number(row.plan_time) > 1439)) {
+    throw new ValidationError('tasks.plan_time must be minutes between 0 and 1439');
+  }
+  if (table === 'tasks' && row.plan_minutes !== null && (Number(row.plan_minutes) < 1 || Number(row.plan_minutes) > 1440)) {
+    throw new ValidationError('tasks.plan_minutes must be between 1 and 1440');
   }
   return row;
 }

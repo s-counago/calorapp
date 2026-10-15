@@ -11,6 +11,13 @@ export const SLOTS = ['morning', 'afternoon', 'evening'] as const;
 /** Kanban columns, in board order: stack infinito, prioridad, baúl, fracasos. */
 export const BOARD_COLUMNS = ['stack', 'priority', 'vault', 'failed'] as const;
 export type BoardColumn = (typeof BOARD_COLUMNS)[number];
+/**
+ * What a task is to Sejio, exactly one per task: bandeja (inbox), prioridad, stack, esperando
+ * (waiting), baúl (vault) or fracasos (failed). Read from `board` and `following`, so older phones
+ * that only know those two fields keep agreeing with the backend.
+ */
+export const LANES = ['inbox', 'priority', 'stack', 'waiting', 'vault', 'failed'] as const;
+export type Lane = (typeof LANES)[number];
 
 export class NotFoundError extends Error {}
 
@@ -66,8 +73,20 @@ export interface Task extends Record<string, unknown> {
   status: string;
 }
 
+export function laneOf(task: { board?: unknown; following?: unknown }): Lane {
+  if (task.following === true || task.following === 1) return 'waiting';
+  return typeof task.board === 'string' && (BOARD_COLUMNS as readonly string[]).includes(task.board) ? (task.board as Lane) : 'inbox';
+}
+
+/** The `board` and `following` that put a task in `lane`. */
+function laneFields(lane: unknown): { board: BoardColumn | null; following: boolean } {
+  if (typeof lane !== 'string' || !(LANES as readonly string[]).includes(lane)) throw new ValidationError(`lane must be one of ${LANES.join(', ')}`);
+  return { board: (BOARD_COLUMNS as readonly string[]).includes(lane) ? (lane as BoardColumn) : null, following: lane === 'waiting' };
+}
+
 function taskFromRow(row: Row): Task {
-  return { id: String(row.id), ...toRecord('tasks', row), updated_at: Number(row.updated_at) } as unknown as Task;
+  const record = toRecord('tasks', row);
+  return { id: String(row.id), ...record, lane: laneOf(record), updated_at: Number(row.updated_at) } as unknown as Task;
 }
 
 export interface TaskFilter {
@@ -78,6 +97,7 @@ export interface TaskFilter {
   following?: boolean;
   /** A column, or 'none' for tasks that are not on the board. */
   board?: string;
+  lane?: string;
   search?: string;
   limit?: number;
 }
@@ -91,6 +111,14 @@ export async function listTasks(db: D1Database, filter: TaskFilter = {}): Promis
   if (filter.following !== undefined) { where.push('following = ?'); params.push(filter.following ? 1 : 0); }
   if (filter.board === 'none') where.push('board IS NULL');
   else if (filter.board) { where.push('board = ?'); params.push(filter.board); }
+  if (filter.lane !== undefined) {
+    const { board, following } = laneFields(filter.lane);
+    if (following) where.push('following = 1');
+    else {
+      where.push('following = 0');
+      if (board) { where.push('board = ?'); params.push(board); } else where.push('board IS NULL');
+    }
+  }
   if (filter.due_before) { where.push('due_date IS NOT NULL AND due_date <= ?'); params.push(filter.due_before); }
   if (filter.search) { where.push("(title LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')"); const like = `%${filter.search.replace(/[\\%_]/g, '\\$&')}%`; params.push(like, like); }
   const limit = Math.min(Math.max(filter.limit ?? 200, 1), 1000);
@@ -110,26 +138,126 @@ export async function getTask(db: D1Database, id: string): Promise<Task> {
   return taskFromRow(row);
 }
 
-const TASK_EDITABLE = ['title', 'notes', 'status', 'project', 'area', 'priority', 'due_date', 'plan_date', 'plan_slot', 'position', 'source', 'source_id', 'following', 'waiting_for', 'expected_date', 'review_date', 'board'] as const;
+const TASK_EDITABLE = ['title', 'notes', 'status', 'project', 'area', 'priority', 'due_date', 'plan_date', 'plan_slot', 'position', 'source', 'source_id', 'following', 'waiting_for', 'expected_date', 'review_date', 'board', 'plan_time', 'plan_minutes', 'habit_id'] as const;
+
+/** Copies the editable fields of `input` into `data`; `lane`, when given, sets board and following. */
+function applyTaskInput(data: Record<string, unknown>, input: Record<string, unknown>) {
+  for (const key of TASK_EDITABLE) if (input[key] !== undefined) data[key] = input[key];
+  if (input.lane !== undefined) Object.assign(data, laneFields(input.lane));
+  if (typeof data.plan_time === 'string') data.plan_time = parseTime(data.plan_time);
+}
+
+/** "HH:MM" to minutes after midnight. */
+export function parseTime(value: string): number {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value);
+  const minutes = match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) throw new ValidationError('time must be HH:MM, e.g. 09:30');
+  return minutes;
+}
+
+/** The part of the day an hour falls in, as on the phone: before 12:00, before 20:00, or later. */
+export function slotForTime(minutes: number): (typeof SLOTS)[number] {
+  return minutes < 12 * 60 ? 'morning' : minutes < 20 * 60 ? 'afternoon' : 'evening';
+}
 
 export async function createTask(db: D1Database, input: Record<string, unknown>): Promise<Task> {
   const id = typeof input.id === 'string' ? input.id : crypto.randomUUID();
   const now = Date.now();
   const data: Record<string, unknown> = { status: 'todo', created_at: now };
-  for (const key of TASK_EDITABLE) if (input[key] !== undefined) data[key] = input[key];
+  applyTaskInput(data, input);
   if (data.status === 'done') data.completed_at = now;
   await save(db, 'tasks', id, data);
+  if (data.status === 'done') await syncHabitWithTask(db, data, true);
   return getTask(db, id);
 }
 
 export async function updateTask(db: D1Database, id: string, patch: Record<string, unknown>): Promise<Task> {
   const current = await getTask(db, id);
   const data: Record<string, unknown> = { ...current };
-  for (const key of TASK_EDITABLE) if (patch[key] !== undefined) data[key] = patch[key];
+  applyTaskInput(data, patch);
   if (data.status === 'done' && current.status !== 'done') data.completed_at = Date.now();
   if (data.status !== 'done') data.completed_at = null;
   await save(db, 'tasks', id, data);
+  if ((data.status === 'done') !== (current.status === 'done')) await syncHabitWithTask(db, data, data.status === 'done');
   return getTask(db, id);
+}
+
+/** Moves a task to another lane. Its appointment, if any, stays. */
+export async function moveTask(db: D1Database, id: string, lane: unknown): Promise<Task> {
+  return updateTask(db, id, laneFields(lane));
+}
+
+export interface Appointment {
+  /** YYYY-MM-DD, or null to take the task off every day. */
+  day: string | null;
+  slot?: string | null;
+  /** HH:MM, or null for no set time. */
+  time?: string | null;
+  minutes?: number | null;
+}
+
+/**
+ * Plans a task on a day. With a time and no slot, the slot follows the time. A day without slot
+ * or time means "any time that day". day null clears the whole appointment.
+ */
+export async function planTask(db: D1Database, id: string, appointment: Appointment): Promise<Task> {
+  if (!appointment || typeof appointment !== 'object') throw new ValidationError('Expected { day, slot?, time?, minutes? }');
+  const { day, slot = null, time = null, minutes = null } = appointment;
+  if (day === null) return updateTask(db, id, { plan_date: null, plan_slot: null, plan_time: null, plan_minutes: null, position: null });
+  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ValidationError('day must be YYYY-MM-DD or null');
+  if (time !== null && typeof time !== 'string') throw new ValidationError('time must be HH:MM or null');
+  const planTime = time === null ? null : parseTime(time);
+  return updateTask(db, id, {
+    plan_date: day,
+    plan_slot: slot ?? (planTime === null ? null : slotForTime(planTime)),
+    plan_time: planTime,
+    plan_minutes: minutes,
+  });
+}
+
+/** A linked habit is checked on the task's day when the task is done, and unchecked when it is reopened. */
+async function syncHabitWithTask(db: D1Database, task: Record<string, unknown>, done: boolean) {
+  if (typeof task.habit_id !== 'string' || typeof task.plan_date !== 'string') return;
+  const habit = await getRow(db, 'habits', task.habit_id);
+  if (!habit || habit.deleted === 1) return;
+  await save(db, 'habit_checks', `${task.habit_id}:${task.plan_date}`, { habit_id: task.habit_id, day: task.plan_date }, !done);
+}
+
+/**
+ * Turns a habit into a task for one day ("any time that day", lane prioridad) in one step. Asking
+ * twice for the same habit and day returns the task already there instead of making another.
+ */
+export async function habitToTask(db: D1Database, habitId: string, day: string): Promise<Task> {
+  const habit = await getRow(db, 'habits', habitId);
+  if (!habit || habit.deleted === 1) throw new NotFoundError(`No habit ${habitId}`);
+  const existing = await db
+    .prepare(`SELECT * FROM tasks WHERE deleted = 0 AND habit_id = ? AND plan_date = ? AND status != 'cancelled' LIMIT 1`)
+    .bind(habitId, day)
+    .first<Row>();
+  if (existing) return taskFromRow(existing);
+  return createTask(db, { title: String(habit.name), lane: 'priority', plan_date: day, habit_id: habitId });
+}
+
+/**
+ * Everything about tasks at a glance: open tasks per lane, today's plan, what was planned on an
+ * earlier day and is still open (left over), and the running total of tasks done.
+ */
+export async function tasksOverview(db: D1Database, today: string) {
+  const [lanes, planned, leftOver, board] = await Promise.all([
+    db.prepare(`SELECT board, following, COUNT(*) AS n FROM tasks WHERE deleted = 0 AND status = 'todo' GROUP BY board, following`).all<{ board: string | null; following: number; n: number }>(),
+    listTasks(db, { plan_date: today }),
+    db.prepare(`SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND plan_date IS NOT NULL AND plan_date < ? ORDER BY plan_date, plan_slot, position LIMIT 200`).bind(today).all<Row>(),
+    boardSummary(db),
+  ]);
+  const counts = Object.fromEntries(LANES.map((lane) => [lane, 0])) as Record<Lane, number>;
+  for (const row of lanes.results) counts[laneOf(row)] += row.n;
+  return {
+    day: today,
+    lanes: counts,
+    today: Object.fromEntries([null, ...SLOTS].map((slot) => [slot ?? 'any_time', planned.filter((task) => (task.plan_slot ?? null) === slot)])),
+    left_over: leftOver.results.map(taskFromRow),
+    done_total: board.done_total,
+  };
 }
 
 export async function deleteTask(db: D1Database, id: string): Promise<void> {
@@ -274,6 +402,15 @@ export async function setHabitCheck(db: D1Database, habitId: string, day: string
   const habit = await getRow(db, 'habits', habitId);
   if (!habit || habit.deleted === 1) throw new NotFoundError(`No habit ${habitId}`);
   await save(db, 'habit_checks', `${habitId}:${day}`, { habit_id: habitId, day }, !done);
+  // A task made from this habit for that day follows the check, so the same thing is never marked twice.
+  const linked = await db
+    .prepare(`SELECT * FROM tasks WHERE deleted = 0 AND habit_id = ? AND plan_date = ? AND status = ?`)
+    .bind(habitId, day, done ? 'todo' : 'done')
+    .all<Row>();
+  for (const row of linked.results) {
+    const task = taskFromRow(row);
+    await save(db, 'tasks', task.id, { ...task, status: done ? 'done' : 'todo', completed_at: done ? Date.now() : null });
+  }
 }
 
 // Counters ------------------------------------------------------------------------
@@ -320,12 +457,13 @@ async function metricTotals(db: D1Database, from: string, to: string) {
 // Summaries -----------------------------------------------------------------------
 
 export async function daySummary(db: D1Database, day: string) {
-  const [totals, goal, plan, habits, health] = await Promise.all([
+  const [totals, goal, plan, habits, health, note] = await Promise.all([
     metricTotals(db, day, day),
     goals(db),
     listTasks(db, { plan_date: day }),
     listHabits(db, day),
     healthDays(db, day, day),
+    getFocusNote(db, day),
   ]);
   const total = (kind: MetricKind) => totals.find((row) => row.kind === kind)?.total ?? 0;
   return {
@@ -338,6 +476,7 @@ export async function daySummary(db: D1Database, day: string) {
     plan: Object.fromEntries([...SLOTS, null].map((slot) => [slot ?? 'unslotted', plan.filter((task) => (task.plan_slot ?? null) === slot)])),
     habits: habits.map((habit) => ({ id: habit.id, name: habit.name, done: habit.done_today })),
     health: health[0] ?? null,
+    note: note?.active ? { text: note.text, until: note.until } : null,
   };
 }
 
@@ -472,6 +611,205 @@ export function healthAverages(days: HealthDay[]) {
   };
 }
 
+// Captures (el cajón) -------------------------------------------------------------
+
+export const CAPTURE_STATUSES = ['new', 'kept', 'filed', 'archived'] as const;
+export const CAPTURE_KINDS = ['note', 'idea', 'link', 'task', 'other'] as const;
+const URL_IN_TEXT = /https?:\/\/[^\s<>"]+/i;
+
+export interface Capture extends Record<string, unknown> {
+  id: string;
+  text: string;
+  status: string;
+}
+
+function captureFromRow(row: Row): Capture {
+  const record = toRecord('captures', row);
+  let suggestion: unknown = null;
+  try { suggestion = typeof record.suggestion === 'string' ? JSON.parse(record.suggestion) : null; } catch { suggestion = null; }
+  return { id: String(row.id), ...record, suggestion, updated_at: Number(row.updated_at) } as unknown as Capture;
+}
+
+export async function getCapture(db: D1Database, id: string): Promise<Capture> {
+  const row = await getRow(db, 'captures', id);
+  if (!row || row.deleted === 1) throw new NotFoundError(`No capture ${id}`);
+  return captureFromRow(row);
+}
+
+/** Drops something into the cajón. A link inside the text becomes `url` when none is given. */
+export async function createCapture(db: D1Database, input: { text?: unknown; url?: unknown; title?: unknown; source?: unknown; id?: unknown }) {
+  const text = typeof input.text === 'string' ? input.text.trim() : '';
+  const url = typeof input.url === 'string' && input.url ? input.url : (URL_IN_TEXT.exec(text)?.[0] ?? null);
+  if (!text && !url) throw new ValidationError('text or url is required');
+  const id = typeof input.id === 'string' ? input.id : crypto.randomUUID();
+  await save(db, 'captures', id, {
+    text: text || url,
+    url,
+    title: typeof input.title === 'string' ? input.title : null,
+    source: typeof input.source === 'string' ? input.source : null,
+    status: 'new',
+    kind: url && (!text || text === url) ? 'link' : null,
+    created_at: Date.now(),
+  });
+  return getCapture(db, id);
+}
+
+export interface CaptureFilter {
+  status?: string;
+  kind?: string;
+  tag?: string;
+  search?: string;
+  /** Only captures without an agent suggestion yet. */
+  unsuggested?: boolean;
+  limit?: number;
+}
+
+/** Captures, newest first. Defaults to the ones still waiting (status new). */
+export async function listCaptures(db: D1Database, filter: CaptureFilter = {}) {
+  const where = ['deleted = 0'];
+  const params: (string | number)[] = [];
+  const status = filter.status ?? 'new';
+  if (status !== 'all') {
+    if (!(CAPTURE_STATUSES as readonly string[]).includes(status)) throw new ValidationError(`status must be all or one of ${CAPTURE_STATUSES.join(', ')}`);
+    where.push('status = ?'); params.push(status);
+  }
+  if (filter.kind) { where.push('kind = ?'); params.push(filter.kind); }
+  if (filter.tag) { where.push("(',' || tags || ',') LIKE ?"); params.push(`%,${filter.tag.replace(/[%_,]/g, '')},%`); }
+  if (filter.unsuggested) where.push('suggestion IS NULL');
+  if (filter.search) {
+    where.push("(text LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR url LIKE ? ESCAPE '\\')");
+    const like = `%${filter.search.replace(/[\\%_]/g, '\\$&')}%`;
+    params.push(like, like, like);
+  }
+  const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
+  const { results } = await db.prepare(`SELECT * FROM captures WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT ${limit}`).bind(...params).all<Row>();
+  const waiting = await db.prepare(`SELECT COUNT(*) AS n FROM captures WHERE deleted = 0 AND status = 'new'`).first<{ n: number }>();
+  return { waiting: waiting?.n ?? 0, items: results.map(captureFromRow) };
+}
+
+function cleanTags(tags: unknown): string | null {
+  if (tags === undefined || tags === null) return null;
+  const list = (Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(',') : null);
+  if (!list) throw new ValidationError('tags must be a list of words');
+  const clean = [...new Set(list.map((tag) => String(tag).trim().toLowerCase().replace(/,/g, '')).filter(Boolean))];
+  return clean.length ? clean.join(',') : null;
+}
+
+/**
+ * What an agent thinks a capture is. It is only stored next to the capture; nothing moves until
+ * Sejio (or an agent he asked) files it. `lane` and `day` describe the task it would become.
+ */
+export async function suggestCapture(db: D1Database, id: string, suggestion: Record<string, unknown>) {
+  const capture = await getCapture(db, id);
+  if (!suggestion || typeof suggestion !== 'object') throw new ValidationError('suggestion must be an object');
+  const kind = suggestion.kind;
+  if (!(CAPTURE_KINDS as readonly string[]).includes(String(kind))) throw new ValidationError(`kind must be one of ${CAPTURE_KINDS.join(', ')}`);
+  if (suggestion.lane !== undefined && suggestion.lane !== null && !(LANES as readonly string[]).includes(String(suggestion.lane))) {
+    throw new ValidationError(`lane must be one of ${LANES.join(', ')}`);
+  }
+  const clean = {
+    kind,
+    title: typeof suggestion.title === 'string' ? suggestion.title.slice(0, 500) : null,
+    lane: suggestion.lane ?? null,
+    day: typeof suggestion.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(suggestion.day) ? suggestion.day : null,
+    tags: cleanTags(suggestion.tags)?.split(',') ?? [],
+    reason: typeof suggestion.reason === 'string' ? suggestion.reason.slice(0, 500) : null,
+  };
+  await save(db, 'captures', id, { ...capture, suggestion: JSON.stringify(clean) });
+  return getCapture(db, id);
+}
+
+export interface FileCapture {
+  /** task: becomes a task; keep: stays in the library as a note, idea or link; archive: done with it. */
+  as: 'task' | 'keep' | 'archive';
+  title?: string;
+  lane?: string;
+  day?: string | null;
+  kind?: string;
+  tags?: unknown;
+}
+
+/** Decides what a capture is. Filing it as a task creates the task (its notes keep the text and link). */
+export async function fileCapture(db: D1Database, id: string, decision: FileCapture) {
+  const capture = await getCapture(db, id);
+  if (!decision || typeof decision !== 'object') throw new ValidationError('Expected { as: task | keep | archive }');
+  if (decision.as === 'task') {
+    const title = (typeof decision.title === 'string' && decision.title.trim()) || String(capture.title ?? capture.text).split('\n')[0].slice(0, 500);
+    const notes = [capture.text !== title ? capture.text : null, capture.url && !String(capture.text).includes(String(capture.url)) ? capture.url : null].filter(Boolean).join('\n\n') || null;
+    const task = await createTask(db, {
+      title,
+      notes,
+      lane: decision.lane ?? 'inbox',
+      plan_date: decision.day ?? undefined,
+      source: 'capture',
+      source_id: id,
+    });
+    await save(db, 'captures', id, { ...capture, suggestion: capture.suggestion ? JSON.stringify(capture.suggestion) : null, status: 'filed', kind: 'task', task_id: task.id, tags: cleanTags(decision.tags) ?? capture.tags ?? null });
+    return { capture: await getCapture(db, id), task };
+  }
+  if (decision.as === 'keep' || decision.as === 'archive') {
+    const kind = decision.kind ?? capture.kind ?? null;
+    if (kind !== null && !(CAPTURE_KINDS as readonly string[]).includes(String(kind))) throw new ValidationError(`kind must be one of ${CAPTURE_KINDS.join(', ')}`);
+    await save(db, 'captures', id, {
+      ...capture,
+      suggestion: capture.suggestion ? JSON.stringify(capture.suggestion) : null,
+      status: decision.as === 'keep' ? 'kept' : 'archived',
+      kind,
+      title: typeof decision.title === 'string' ? decision.title : capture.title ?? null,
+      tags: decision.tags === undefined ? capture.tags ?? null : cleanTags(decision.tags),
+    });
+    return { capture: await getCapture(db, id), task: null };
+  }
+  throw new ValidationError('as must be task, keep or archive');
+}
+
+export async function deleteCapture(db: D1Database, id: string) {
+  const capture = await getCapture(db, id);
+  await save(db, 'captures', id, { ...capture, suggestion: capture.suggestion ? JSON.stringify(capture.suggestion) : null }, true);
+}
+
+// Focus note ----------------------------------------------------------------------
+
+/**
+ * One short note that Sejio wants in sight for the next few days ("esta semana, solo lo de
+ * Prioridad"). Stored as the synced setting `focus_note` holding JSON { text, until }, so older
+ * phones simply ignore it. Past `until` (inclusive) it stops showing but is kept.
+ */
+export const FOCUS_NOTE_SETTING = 'focus_note';
+export const MAX_NOTE = 280;
+
+export interface FocusNote {
+  text: string;
+  /** Last day it shows (YYYY-MM-DD), or null to keep it until it is changed. */
+  until: string | null;
+  updated_at: number;
+}
+
+export async function getFocusNote(db: D1Database, today: string): Promise<(FocusNote & { active: boolean }) | null> {
+  const row = await db.prepare(`SELECT value, updated_at FROM settings WHERE id = ? AND deleted = 0`).bind(FOCUS_NOTE_SETTING).first<{ value: string; updated_at: number }>();
+  if (!row) return null;
+  let parsed: { text?: unknown; until?: unknown };
+  try { parsed = JSON.parse(row.value); } catch { return null; }
+  if (typeof parsed.text !== 'string' || !parsed.text) return null;
+  const until = typeof parsed.until === 'string' ? parsed.until : null;
+  return { text: parsed.text, until, updated_at: Number(row.updated_at), active: until === null || until >= today };
+}
+
+/** Sets the note, or clears it with an empty or null text. */
+export async function setFocusNote(db: D1Database, text: unknown, until: unknown, today: string) {
+  if (text === null || text === undefined || (typeof text === 'string' && !text.trim())) {
+    await save(db, 'settings', FOCUS_NOTE_SETTING, { value: '{}' }, true);
+    return null;
+  }
+  if (typeof text !== 'string') throw new ValidationError('text must be text');
+  if (text.trim().length > MAX_NOTE) throw new ValidationError(`text must be at most ${MAX_NOTE} characters`);
+  if (until !== undefined && until !== null && (typeof until !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(until))) {
+    throw new ValidationError('until must be YYYY-MM-DD or null');
+  }
+  await save(db, 'settings', FOCUS_NOTE_SETTING, { value: JSON.stringify({ text: text.trim(), until: until ?? null }) });
+  return getFocusNote(db, today);
+}
+
 // Features ------------------------------------------------------------------------
 
 /**
@@ -491,6 +829,24 @@ export const FEATURES = [
     key: 'task_kanban',
     title: 'Tablero Kanban en Tareas',
     description: 'Un segmento Kanban en Tareas con stack infinito, prioridad, baúl y fracasos, y el contador de tareas hechas.',
+    default: false,
+  },
+  {
+    key: 'habit_tasks',
+    title: 'Hábito → tarea',
+    description: 'Un botón en cada hábito para ponerlo como tarea de hoy o de mañana, con un evento de día completo en Google Calendar.',
+    default: false,
+  },
+  {
+    key: 'captures',
+    title: 'Cajón',
+    description: 'Un sitio donde volcar enlaces, ideas y notas en dos toques (también desde Compartir), para ordenarlos luego.',
+    default: false,
+  },
+  {
+    key: 'focus_note',
+    title: 'Nota en Hoy',
+    description: 'Una frase o un plan para los próximos días, en una línea discreta bajo el saludo de Hoy.',
     default: false,
   },
   {
