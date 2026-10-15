@@ -19,6 +19,14 @@ export function localDay(timeZone: string, at: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
 }
 
+/** The day closes at 03:00: something logged at 01:30 still belongs to the previous day. */
+export const DAY_START_HOUR = 3;
+
+/** Today as Sejio counts it, in the given time zone, with the 03:00 cutoff. */
+export function currentDay(timeZone: string, at: Date = new Date()): string {
+  return localDay(timeZone, new Date(at.getTime() - DAY_START_HOUR * 3600_000));
+}
+
 export function addDays(day: string, days: number): string {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);

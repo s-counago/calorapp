@@ -40,7 +40,7 @@ import {
   importTasks,
   listHabits,
   listTasks,
-  localDay,
+  currentDay,
   logMetric,
   setDoneTotal,
   setHabitCheck,
@@ -223,7 +223,7 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 
-const today = (c: Context<AppEnv>) => localDay(c.env.TIME_ZONE);
+const today = (c: Context<AppEnv>) => currentDay(c.env.TIME_ZONE);
 const dayQuery = (c: Context<AppEnv>) => {
   const day = c.req.query('day');
   if (day === undefined) return today(c);
