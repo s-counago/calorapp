@@ -38,6 +38,12 @@ export const TABLES = {
       expected_date: { type: 'day' },
       review_date: { type: 'day' },
       board: { type: 'text', values: ['stack', 'priority', 'vault', 'failed'] },
+      /** Minutes after local midnight on plan_date (0–1439), for a task with a set time. */
+      plan_time: { type: 'int' },
+      /** How long the task takes, in minutes (1–1440). */
+      plan_minutes: { type: 'int' },
+      /** The habit this task was made from; completing the task checks the habit on plan_date. */
+      habit_id: { type: 'text', max: 100 },
     },
   },
   habits: {
@@ -135,6 +141,12 @@ export function validateRecord(table: TableName, data: Record<string, unknown>):
   }
   if (table === 'habits' && (Number(row.weekly_goal) < 1 || Number(row.weekly_goal) > 7)) {
     throw new ValidationError('habits.weekly_goal must be between 1 and 7');
+  }
+  if (table === 'tasks' && row.plan_time !== null && (Number(row.plan_time) < 0 || Number(row.plan_time) > 1439)) {
+    throw new ValidationError('tasks.plan_time must be minutes between 0 and 1439');
+  }
+  if (table === 'tasks' && row.plan_minutes !== null && (Number(row.plan_minutes) < 1 || Number(row.plan_minutes) > 1440)) {
+    throw new ValidationError('tasks.plan_minutes must be between 1 and 1440');
   }
   return row;
 }

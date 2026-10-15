@@ -67,7 +67,7 @@ Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
 
 ## MCP
 
-Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `board_summary`, `set_done_total`, `import_tasks`, `list_habits` (con puntos y racha), `create_habit`, `update_habit`, `delete_habit`, `check_habit`, `log_counter`, `set_counter`, `counter_entries`, `set_goals`, `day_summary`, `weekly_review` (semana o mes), `health_days` (sueño, pasos, ejercicio y pulso del reloj), `list_features` y `set_feature`.
+Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `tasks_overview` (cuentas por carril, plan del día y lo que quedó de días anteriores), `move_task` (cambiar de carril), `plan_task` (día, franja, hora y duración), `board_summary`, `set_done_total`, `import_tasks`, `list_habits` (con puntos y racha), `create_habit`, `update_habit`, `delete_habit`, `check_habit`, `habit_to_task` (un hábito como tarea de hoy o mañana), `log_counter`, `set_counter`, `counter_entries`, `set_goals`, `day_summary`, `weekly_review` (semana o mes), `health_days` (sueño, pasos, ejercicio y pulso del reloj), `list_features` y `set_feature`.
 
 Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 

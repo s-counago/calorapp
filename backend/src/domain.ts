@@ -11,6 +11,13 @@ export const SLOTS = ['morning', 'afternoon', 'evening'] as const;
 /** Kanban columns, in board order: stack infinito, prioridad, baúl, fracasos. */
 export const BOARD_COLUMNS = ['stack', 'priority', 'vault', 'failed'] as const;
 export type BoardColumn = (typeof BOARD_COLUMNS)[number];
+/**
+ * What a task is to Sejio, exactly one per task: bandeja (inbox), prioridad, stack, esperando
+ * (waiting), baúl (vault) or fracasos (failed). Read from `board` and `following`, so older phones
+ * that only know those two fields keep agreeing with the backend.
+ */
+export const LANES = ['inbox', 'priority', 'stack', 'waiting', 'vault', 'failed'] as const;
+export type Lane = (typeof LANES)[number];
 
 export class NotFoundError extends Error {}
 
@@ -66,8 +73,20 @@ export interface Task extends Record<string, unknown> {
   status: string;
 }
 
+export function laneOf(task: { board?: unknown; following?: unknown }): Lane {
+  if (task.following === true || task.following === 1) return 'waiting';
+  return typeof task.board === 'string' && (BOARD_COLUMNS as readonly string[]).includes(task.board) ? (task.board as Lane) : 'inbox';
+}
+
+/** The `board` and `following` that put a task in `lane`. */
+function laneFields(lane: unknown): { board: BoardColumn | null; following: boolean } {
+  if (typeof lane !== 'string' || !(LANES as readonly string[]).includes(lane)) throw new ValidationError(`lane must be one of ${LANES.join(', ')}`);
+  return { board: (BOARD_COLUMNS as readonly string[]).includes(lane) ? (lane as BoardColumn) : null, following: lane === 'waiting' };
+}
+
 function taskFromRow(row: Row): Task {
-  return { id: String(row.id), ...toRecord('tasks', row), updated_at: Number(row.updated_at) } as unknown as Task;
+  const record = toRecord('tasks', row);
+  return { id: String(row.id), ...record, lane: laneOf(record), updated_at: Number(row.updated_at) } as unknown as Task;
 }
 
 export interface TaskFilter {
@@ -82,6 +101,7 @@ export interface TaskFilter {
   following?: boolean;
   /** A column, or 'none' for tasks that are not on the board. */
   board?: string;
+  lane?: string;
   search?: string;
   limit?: number;
 }
@@ -97,6 +117,14 @@ export async function listTasks(db: D1Database, filter: TaskFilter = {}): Promis
   if (filter.following !== undefined) { where.push('following = ?'); params.push(filter.following ? 1 : 0); }
   if (filter.board === 'none') where.push('board IS NULL');
   else if (filter.board) { where.push('board = ?'); params.push(filter.board); }
+  if (filter.lane !== undefined) {
+    const { board, following } = laneFields(filter.lane);
+    if (following) where.push('following = 1');
+    else {
+      where.push('following = 0');
+      if (board) { where.push('board = ?'); params.push(board); } else where.push('board IS NULL');
+    }
+  }
   if (filter.due_before) { where.push('due_date IS NOT NULL AND due_date <= ?'); params.push(filter.due_before); }
   if (filter.search) { where.push("(title LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')"); const like = `%${filter.search.replace(/[\\%_]/g, '\\$&')}%`; params.push(like, like); }
   const limit = Math.min(Math.max(filter.limit ?? 200, 1), 1000);
@@ -116,26 +144,126 @@ export async function getTask(db: D1Database, id: string): Promise<Task> {
   return taskFromRow(row);
 }
 
-const TASK_EDITABLE = ['title', 'notes', 'status', 'project', 'area', 'priority', 'due_date', 'plan_date', 'plan_slot', 'position', 'source', 'source_id', 'following', 'waiting_for', 'expected_date', 'review_date', 'board'] as const;
+const TASK_EDITABLE = ['title', 'notes', 'status', 'project', 'area', 'priority', 'due_date', 'plan_date', 'plan_slot', 'position', 'source', 'source_id', 'following', 'waiting_for', 'expected_date', 'review_date', 'board', 'plan_time', 'plan_minutes', 'habit_id'] as const;
+
+/** Copies the editable fields of `input` into `data`; `lane`, when given, sets board and following. */
+function applyTaskInput(data: Record<string, unknown>, input: Record<string, unknown>) {
+  for (const key of TASK_EDITABLE) if (input[key] !== undefined) data[key] = input[key];
+  if (input.lane !== undefined) Object.assign(data, laneFields(input.lane));
+  if (typeof data.plan_time === 'string') data.plan_time = parseTime(data.plan_time);
+}
+
+/** "HH:MM" to minutes after midnight. */
+export function parseTime(value: string): number {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value);
+  const minutes = match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) throw new ValidationError('time must be HH:MM, e.g. 09:30');
+  return minutes;
+}
+
+/** The part of the day an hour falls in, as on the phone: before 12:00, before 20:00, or later. */
+export function slotForTime(minutes: number): (typeof SLOTS)[number] {
+  return minutes < 12 * 60 ? 'morning' : minutes < 20 * 60 ? 'afternoon' : 'evening';
+}
 
 export async function createTask(db: D1Database, input: Record<string, unknown>): Promise<Task> {
   const id = typeof input.id === 'string' ? input.id : crypto.randomUUID();
   const now = Date.now();
   const data: Record<string, unknown> = { status: 'todo', created_at: now };
-  for (const key of TASK_EDITABLE) if (input[key] !== undefined) data[key] = input[key];
+  applyTaskInput(data, input);
   if (data.status === 'done') data.completed_at = now;
   await save(db, 'tasks', id, data);
+  if (data.status === 'done') await syncHabitWithTask(db, data, true);
   return getTask(db, id);
 }
 
 export async function updateTask(db: D1Database, id: string, patch: Record<string, unknown>): Promise<Task> {
   const current = await getTask(db, id);
   const data: Record<string, unknown> = { ...current };
-  for (const key of TASK_EDITABLE) if (patch[key] !== undefined) data[key] = patch[key];
+  applyTaskInput(data, patch);
   if (data.status === 'done' && current.status !== 'done') data.completed_at = Date.now();
   if (data.status !== 'done') data.completed_at = null;
   await save(db, 'tasks', id, data);
+  if ((data.status === 'done') !== (current.status === 'done')) await syncHabitWithTask(db, data, data.status === 'done');
   return getTask(db, id);
+}
+
+/** Moves a task to another lane. Its appointment, if any, stays. */
+export async function moveTask(db: D1Database, id: string, lane: unknown): Promise<Task> {
+  return updateTask(db, id, laneFields(lane));
+}
+
+export interface Appointment {
+  /** YYYY-MM-DD, or null to take the task off every day. */
+  day: string | null;
+  slot?: string | null;
+  /** HH:MM, or null for no set time. */
+  time?: string | null;
+  minutes?: number | null;
+}
+
+/**
+ * Plans a task on a day. With a time and no slot, the slot follows the time. A day without slot
+ * or time means "any time that day". day null clears the whole appointment.
+ */
+export async function planTask(db: D1Database, id: string, appointment: Appointment): Promise<Task> {
+  if (!appointment || typeof appointment !== 'object') throw new ValidationError('Expected { day, slot?, time?, minutes? }');
+  const { day, slot = null, time = null, minutes = null } = appointment;
+  if (day === null) return updateTask(db, id, { plan_date: null, plan_slot: null, plan_time: null, plan_minutes: null, position: null });
+  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ValidationError('day must be YYYY-MM-DD or null');
+  if (time !== null && typeof time !== 'string') throw new ValidationError('time must be HH:MM or null');
+  const planTime = time === null ? null : parseTime(time);
+  return updateTask(db, id, {
+    plan_date: day,
+    plan_slot: slot ?? (planTime === null ? null : slotForTime(planTime)),
+    plan_time: planTime,
+    plan_minutes: minutes,
+  });
+}
+
+/** A linked habit is checked on the task's day when the task is done, and unchecked when it is reopened. */
+async function syncHabitWithTask(db: D1Database, task: Record<string, unknown>, done: boolean) {
+  if (typeof task.habit_id !== 'string' || typeof task.plan_date !== 'string') return;
+  const habit = await getRow(db, 'habits', task.habit_id);
+  if (!habit || habit.deleted === 1) return;
+  await save(db, 'habit_checks', `${task.habit_id}:${task.plan_date}`, { habit_id: task.habit_id, day: task.plan_date }, !done);
+}
+
+/**
+ * Turns a habit into a task for one day ("any time that day", lane prioridad) in one step. Asking
+ * twice for the same habit and day returns the task already there instead of making another.
+ */
+export async function habitToTask(db: D1Database, habitId: string, day: string): Promise<Task> {
+  const habit = await getRow(db, 'habits', habitId);
+  if (!habit || habit.deleted === 1) throw new NotFoundError(`No habit ${habitId}`);
+  const existing = await db
+    .prepare(`SELECT * FROM tasks WHERE deleted = 0 AND habit_id = ? AND plan_date = ? AND status != 'cancelled' LIMIT 1`)
+    .bind(habitId, day)
+    .first<Row>();
+  if (existing) return taskFromRow(existing);
+  return createTask(db, { title: String(habit.name), lane: 'priority', plan_date: day, habit_id: habitId });
+}
+
+/**
+ * Everything about tasks at a glance: open tasks per lane, today's plan, what was planned on an
+ * earlier day and is still open (left over), and the running total of tasks done.
+ */
+export async function tasksOverview(db: D1Database, today: string) {
+  const [lanes, planned, leftOver, board] = await Promise.all([
+    db.prepare(`SELECT board, following, COUNT(*) AS n FROM tasks WHERE deleted = 0 AND status = 'todo' GROUP BY board, following`).all<{ board: string | null; following: number; n: number }>(),
+    listTasks(db, { plan_date: today }),
+    db.prepare(`SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND plan_date IS NOT NULL AND plan_date < ? ORDER BY plan_date, plan_slot, position LIMIT 200`).bind(today).all<Row>(),
+    boardSummary(db),
+  ]);
+  const counts = Object.fromEntries(LANES.map((lane) => [lane, 0])) as Record<Lane, number>;
+  for (const row of lanes.results) counts[laneOf(row)] += row.n;
+  return {
+    day: today,
+    lanes: counts,
+    today: Object.fromEntries([null, ...SLOTS].map((slot) => [slot ?? 'any_time', planned.filter((task) => (task.plan_slot ?? null) === slot)])),
+    left_over: leftOver.results.map(taskFromRow),
+    done_total: board.done_total,
+  };
 }
 
 export async function deleteTask(db: D1Database, id: string): Promise<void> {
@@ -385,6 +513,15 @@ export async function deleteHabit(db: D1Database, id: string) {
 export async function setHabitCheck(db: D1Database, habitId: string, day: string, done: boolean) {
   await getHabitRow(db, habitId);
   await save(db, 'habit_checks', `${habitId}:${day}`, { habit_id: habitId, day }, !done);
+  // A task made from this habit for that day follows the check, so the same thing is never marked twice.
+  const linked = await db
+    .prepare(`SELECT * FROM tasks WHERE deleted = 0 AND habit_id = ? AND plan_date = ? AND status = ?`)
+    .bind(habitId, day, done ? 'todo' : 'done')
+    .all<Row>();
+  for (const row of linked.results) {
+    const task = taskFromRow(row);
+    await save(db, 'tasks', task.id, { ...task, status: done ? 'done' : 'todo', completed_at: done ? Date.now() : null });
+  }
 }
 
 // Counters ------------------------------------------------------------------------
