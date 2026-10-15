@@ -22,7 +22,7 @@ import java.util.UUID;
  */
 final class PausaDb extends SQLiteOpenHelper {
     static final String NAME = "pausa.db";
-    private static final int VERSION = 3;
+    private static final int VERSION = 5;
     private static PausaDb instance;
 
     private final Context context;
@@ -55,6 +55,7 @@ final class PausaDb extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX metric_entries_day ON metric_entries (day, kind)");
         db.execSQL("CREATE TABLE settings (id TEXT PRIMARY KEY, value TEXT NOT NULL, " + sync + ")");
         createHealthDays(db);
+        createBudgetCycles(db);
         // Local only: habit points are derived on the phone from the checks (see HabitStore).
         db.execSQL("CREATE TABLE habit_scores (habit_id TEXT PRIMARY KEY, json TEXT NOT NULL)");
         // One entry per record with unsent changes. `rev` grows on every edit, so a record edited
@@ -73,6 +74,17 @@ final class PausaDb extends SQLiteOpenHelper {
             db.execSQL("CREATE INDEX tasks_board ON tasks (board, status)");
         }
         if (oldVersion < 3) createHealthDays(db);
+        // 4 is left to the task-lanes columns of the redesign; IF NOT EXISTS keeps both orders safe.
+        if (oldVersion < 5) createBudgetCycles(db);
+    }
+
+    /** Money summary per payday cycle, see backend migration 0008 and BudgetCloud. */
+    private static void createBudgetCycles(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS budget_cycles (id TEXT PRIMARY KEY, start TEXT NOT NULL, \"end\" TEXT NOT NULL, "
+                + "current INTEGER NOT NULL DEFAULT 0, income INTEGER, fixed INTEGER, saved INTEGER, savings_target INTEGER, "
+                + "free_budget INTEGER, free_spent INTEGER, available INTEGER, daily_allowance INTEGER, projection INTEGER, "
+                + "savings_at_close INTEGER, unexpected INTEGER, covered INTEGER, cushion_left INTEGER, lines TEXT, categories TEXT, "
+                + "computed_at INTEGER, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)");
     }
 
     /** Sleep, steps, exercise and resting heart rate per day from Health Connect, see backend migration 0006. */
@@ -301,7 +313,7 @@ final class PausaDb extends SQLiteOpenHelper {
     static void resetForTests(Context context) {
         PausaDb db = get(context);
         SQLiteDatabase sql = db.getWritableDatabase();
-        for (String table : new String[]{"tasks", "habits", "habit_checks", "metric_entries", "settings", "health_days", "habit_scores", "outbox", "sync_state", "log_queue"}) {
+        for (String table : new String[]{"tasks", "habits", "habit_checks", "metric_entries", "settings", "health_days", "budget_cycles", "habit_scores", "outbox", "sync_state", "log_queue"}) {
             sql.delete(table, null, null);
         }
         db.setState("imported", "1");

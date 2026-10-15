@@ -35,7 +35,10 @@ final class Features {
     static final Feature HEALTH_CONNECT = new Feature("health_connect", "Salud del reloj",
             "Sueño, pasos, ejercicio y pulso en reposo del Pixel Watch, leídos de Health Connect y mostrados en Hoy.", false);
 
-    static final Feature[] ALL = {REVIEW_ZOOM, TASK_KANBAN, HEALTH_CONNECT};
+    static final Feature BUDGET_CLOUD = new Feature("budget_cloud", "Dinero en la web",
+            "Sube el resumen de cada ciclo (presupuesto, topes y gasto por categoría) para verlo en la web. Los movimientos y las credenciales no salen del teléfono.", false);
+
+    static final Feature[] ALL = {REVIEW_ZOOM, TASK_KANBAN, BUDGET_CLOUD, HEALTH_CONNECT};
 
     private Features() {}
 
