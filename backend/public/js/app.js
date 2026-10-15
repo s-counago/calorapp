@@ -14,6 +14,7 @@ import { renderReview } from './views/review.js';
 import { renderHealth } from './views/health.js';
 import { renderSettings } from './views/settings.js';
 import { renderMoney } from './views/money.js';
+import { renderCaptures } from './views/captures.js';
 
 /** Views in menu order. `feature` hides a view while that feature is off, like on the phone. */
 const VIEWS = [
@@ -22,6 +23,7 @@ const VIEWS = [
   { path: 'tareas', label: 'Bandeja', render: renderList, group: 'Tareas' },
   { path: 'tablero', label: 'Carriles', render: renderBoard, feature: 'task_kanban', group: 'Tareas' },
   { path: 'seguimientos', label: 'Esperando', render: renderFollowups, group: 'Tareas' },
+  { path: 'cajon', label: 'Cajón', render: renderCaptures, feature: 'captures', group: 'Tareas' },
   { path: 'habitos', label: 'Hábitos', render: renderHabits },
   { path: 'resumen', label: 'Resumen', render: renderReview, feature: 'review_zoom' },
   { path: 'dinero', label: 'Dinero', render: renderMoney, feature: 'budget_cloud' },

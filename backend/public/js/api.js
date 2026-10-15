@@ -119,6 +119,13 @@ export const Pausa = {
   review: (day, period) => api(`/api/review?day=${day}&period=${period}`),
   health: (from, to) => api(`/api/health?from=${from}&to=${to}`),
 
+  captures: (filter = {}) => api(`/api/captures?${new URLSearchParams(Object.entries(filter).filter(([, value]) => value !== undefined && value !== null && value !== ''))}`),
+  capture: (text) => api('/api/captures', { method: 'POST', body: { text } }),
+  fileCapture: (id, decision) => api(`/api/captures/${id}/file`, { method: 'POST', body: decision }),
+  deleteCapture: (id) => api(`/api/captures/${id}`, { method: 'DELETE' }),
+  note: () => api('/api/note').then((data) => data.note),
+  setNote: (text, until) => api('/api/note', { method: 'PUT', body: { text, until } }).then((data) => data.note),
+
   budget: (day) => api(`/api/budget${day ? `?day=${day}` : ''}`),
   devices: () => api('/api/devices'),
   revokeDevice: (id) => api(`/api/devices/${id}`, { method: 'DELETE' }),

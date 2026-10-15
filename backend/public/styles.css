@@ -278,3 +278,20 @@ table.data td { border-bottom: 1px solid var(--line); padding: .35rem .4rem; ver
 .bar.over span { background: var(--terracotta); }
 .category { display: grid; grid-template-columns: 8rem 1fr 5rem; gap: .6rem; align-items: center; margin: .35rem 0; }
 .category .amount { text-align: right; }
+
+/* Nota en Hoy and Cajón */
+.focus-note { display: block; width: 100%; text-align: left; background: none; border: 0; padding: .1rem 0 .6rem; color: var(--muted); font: inherit; font-style: italic; cursor: pointer; }
+.focus-note:hover { color: var(--ink); }
+.focus-note.empty { opacity: .6; font-style: normal; font-size: .9rem; }
+.segmented button { padding: .3rem .9rem; border-radius: 999px; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; }
+.segmented button.active { background: var(--surface); box-shadow: var(--shadow); }
+.capture-new textarea { width: 100%; resize: vertical; }
+.capture-new .actions { align-items: center; }
+.captures { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 1rem; margin-top: 1rem; }
+.drawer-item h3 { margin: .3rem 0 0; font-size: 1rem; }
+.capture-meta { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.capture-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: .4rem 0; }
+.drawer-item .link { overflow-wrap: anywhere; }
+.suggestion { background: var(--sage-soft); border-radius: 10px; padding: .5rem .8rem; margin: .5rem 0; }
+.suggestion p { margin: .2rem 0; }
+.drawer-item .actions { flex-wrap: wrap; }

@@ -109,7 +109,7 @@ let toastTimer;
 /** Shows a message at the bottom. With `undo`, a button runs it. */
 export function toast(message, { undo, error = false } = {}) {
   const host = document.getElementById('toast');
-  host.replaceChildren(
+  fill(host,
     h('span', message),
     undo ? h('button.link', { onclick: async () => { host.hidden = true; await undo(); } }, 'Deshacer') : null,
   );

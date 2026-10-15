@@ -15,11 +15,12 @@ const KINDS = {
 
 export async function renderToday(root, day) {
   day ??= state.today;
-  const [summary, entries, tomorrow, overview] = await Promise.all([
+  const [summary, entries, tomorrow, overview, note] = await Promise.all([
     Pausa.day(day),
     Pausa.entries(day),
     day === state.today ? Pausa.tasks({ plan_date: addDays(day, 1), status: 'todo' }) : Promise.resolve(null),
     day === state.today ? Pausa.overview(day) : Promise.resolve(null),
+    isOn('focus_note') ? Pausa.note() : Promise.resolve(null),
   ]);
   const isToday = day === state.today;
   fill(root, 
@@ -35,6 +36,7 @@ export async function renderToday(root, day) {
         !isToday ? h('a.pill', { href: '#/hoy' }, 'Volver a hoy') : null,
       ),
     ),
+    isOn('focus_note') ? noteLine(note) : null,
     !isToday && day < state.today ? h('p.notice', 'Estás corrigiendo un día pasado: lo que apuntes se guarda en ese día.') : null,
     h('div.today-grid',
       h('section.column', h('h2.section-title', 'Contadores'), Object.keys(KINDS).map((kind) => counterCard(kind, summary.counters[kind], day, entries))),
@@ -47,6 +49,37 @@ export async function renderToday(root, day) {
       ),
     ),
   );
+}
+
+// Focus note ------------------------------------------------------------------------
+
+/** The discreet line under the date: a sentence or plan for the next few days. Click to edit. */
+function noteLine(note) {
+  const active = note?.active ? note : null;
+  return h('button.focus-note', { class: active ? '' : 'empty', title: 'Editar la nota', onclick: () => editNote(note) },
+    active ? active.text : 'Añadir una nota para estos días',
+    active?.until ? h('span.hint', ` · hasta el ${relativeDay(active.until, state.today)}`) : null,
+  );
+}
+
+async function editNote(note) {
+  const result = await dialog('Nota en Hoy', (close) => {
+    const text = h('textarea', { rows: 3, maxLength: 280, autofocus: true, placeholder: 'Esta semana, solo lo de Prioridad' }, note?.text ?? '');
+    const until = h('input', { type: 'date', value: note?.until ?? '', min: state.today });
+    return h('form.sheet-body', { onsubmit: (event) => { event.preventDefault(); close({ text: text.value.trim(), until: until.value || null }); } },
+      h('label.field', h('span', 'Nota (hasta 280 caracteres)'), text),
+      h('label.field', h('span', 'Mostrar hasta (opcional)'), until),
+      h('div.actions',
+        note ? h('button.ghost.danger-text', { type: 'button', onclick: () => close({ text: '', until: null }) }, 'Quitar') : null,
+        h('span.spacer'),
+        h('button.ghost', { type: 'button', onclick: () => close(undefined) }, 'Cancelar'),
+        h('button.primary', { type: 'submit' }, 'Guardar')),
+    );
+  });
+  if (!result) return;
+  if (await attempt(() => Pausa.setNote(result.text || null, result.until)) === undefined) return;
+  toast(result.text ? 'Nota guardada' : 'Nota quitada');
+  state.refresh();
 }
 
 // Counters ---------------------------------------------------------------------------

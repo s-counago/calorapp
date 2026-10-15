@@ -79,9 +79,10 @@ Para conectarlo en Claude: Ajustes → Conectores → Añadir conector personali
 
 `public/` es una app de una sola página en JavaScript sin dependencias ni paso de compilación (`index.html`, `styles.css`, `js/app.js` y una vista por archivo en `js/views/`). Solo entra con la sesión de Google y usa la misma API REST que el móvil, así que lo que cambies allí llega al teléfono en su siguiente sincronización.
 
-- **Hoy:** contadores con los botones rápidos del móvil, corregir el total, poner a cero y cambiar el objetivo; plan del día por franjas (arrastrar entre franjas, «Añadir de tu lista»); hábitos del día; salud; lo de mañana; entradas del día. Se puede abrir cualquier día para corregirlo.
+- **Hoy:** la nota de estos días (`focus_note`, clic para editarla); contadores con los botones rápidos del móvil, corregir el total, poner a cero y cambiar el objetivo; plan del día por franjas (arrastrar entre franjas, «Añadir de tu lista»); hábitos del día; salud; lo de mañana; entradas del día. Se puede abrir cualquier día para corregirlo.
 - **Semana:** los siete días con sus franjas, lo que quedó atrás, tu lista y Prioridad a un lado; se planifica arrastrando.
-- **Lista, Tablero y Seguimientos:** como en el móvil. El Tablero sale solo con `task_kanban`.
+- **Bandeja, Carriles y Esperando:** como en el móvil. Carriles sale solo con `task_kanban`.
+- **Cajón** (`captures`): apuntar enlaces e ideas, aceptar la sugerencia de un agente, convertir en tarea, guardar en la biblioteca con etiquetas, archivar o borrar.
 - **Hábitos:** puntos, racha y gráfica de 10 a 104 semanas, corregir cualquier semana pasada, crear, editar, archivar y borrar.
 - **Resumen** (`review_zoom`) y **Salud** (`health_connect`).
 - **Ajustes:** funciones, objetivos, dispositivos con su estado de sincronización y logs de las apps.
