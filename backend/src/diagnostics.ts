@@ -116,7 +116,7 @@ export async function syncStatus(db: D1Database) {
     currentSeq(db),
     db.prepare(`SELECT id, name, app_version, created_at, last_seen_at, last_pull_at, last_pull_cursor, last_push_at, last_push_count, last_error_at, revoked_at FROM devices ORDER BY created_at DESC`).all<Record<string, number | string | null>>(),
     db.batch<{ name: string; live: number; deleted: number }>(
-      ['tasks', 'habits', 'habit_checks', 'metric_entries', 'settings', 'health_days'].map((table) =>
+      ['tasks', 'habits', 'habit_checks', 'metric_entries', 'settings', 'health_days', 'budget_cycles'].map((table) =>
         db.prepare(`SELECT '${table}' AS name, SUM(deleted = 0) AS live, SUM(deleted = 1) AS deleted FROM ${table}`),
       ),
     ),

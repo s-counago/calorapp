@@ -25,6 +25,7 @@ import {
   counterEntries,
   setGoals,
   GOAL_DEFAULTS,
+  budgetSummary,
   listTasks,
   currentDay,
   logMetric,
@@ -460,6 +461,19 @@ const TOOLS: Tool[] = [
       },
     },
     run: (env, args) => healthSummary(env.DB, today(env), args.from, args.to),
+  },
+  {
+    name: 'budget',
+    title: 'Money summary of a cycle',
+    description:
+      'The payday-to-payday budget the phone works out, for the cycle containing `day` (default: the latest). Amounts are euro cents. ' +
+      'Includes income, fixed, saved and savings_target, free money (free_budget, free_spent, available, daily_allowance, projection, ' +
+      'savings_at_close), unexpected and cushion, lines (fixed charges and caps/topes with expected, paid, logged and status) and ' +
+      'free spending per category, plus the list of cycles. Read only and only a summary: bank movements and credentials never leave the phone. ' +
+      'Empty until the budget_cloud feature is on and the phone has opened Dinero.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { day: { ...day, description: 'Any day of the cycle (YYYY-MM-DD). Defaults to the latest cycle.' } } },
+    run: (env, args) => budgetSummary(env.DB, args.day === undefined ? undefined : dayArg(env, args.day)),
   },
   {
     name: 'list_features',

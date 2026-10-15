@@ -59,7 +59,7 @@ export async function renderReview(root, params = '') {
         data.tasks.completed.slice().reverse().slice(0, 300).map((task) => taskRow(task, { draggable: false })),
       ),
     ),
-    h('p.hint', 'El dinero del periodo sigue solo en el móvil.'),
+    isOn('budget_cloud') ? h('p.hint', h('a', { href: '#/dinero' }, 'Ver el dinero del ciclo')) : h('p.hint', 'El dinero del periodo está en el móvil; enciende «Dinero en la web» para verlo aquí.'),
   );
 }
 

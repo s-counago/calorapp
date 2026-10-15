@@ -274,3 +274,7 @@ table.data td { border-bottom: 1px solid var(--line); padding: .35rem .4rem; ver
 .chip.time { background: var(--sun-soft); color: #8a5d0c; }
 .chip.lane-priority { background: var(--peach-soft); color: var(--terracotta); }
 .board { grid-template-columns: repeat(6, minmax(15rem, 1fr)); }
+.cap { margin-bottom: .8rem; }
+.bar.over span { background: var(--terracotta); }
+.category { display: grid; grid-template-columns: 8rem 1fr 5rem; gap: .6rem; align-items: center; margin: .35rem 0; }
+.category .amount { text-align: right; }

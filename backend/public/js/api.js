@@ -119,6 +119,7 @@ export const Pausa = {
   review: (day, period) => api(`/api/review?day=${day}&period=${period}`),
   health: (from, to) => api(`/api/health?from=${from}&to=${to}`),
 
+  budget: (day) => api(`/api/budget${day ? `?day=${day}` : ''}`),
   devices: () => api('/api/devices'),
   revokeDevice: (id) => api(`/api/devices/${id}`, { method: 'DELETE' }),
   status: () => api('/api/status'),

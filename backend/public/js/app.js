@@ -13,6 +13,7 @@ import { renderHabits } from './views/habits.js';
 import { renderReview } from './views/review.js';
 import { renderHealth } from './views/health.js';
 import { renderSettings } from './views/settings.js';
+import { renderMoney } from './views/money.js';
 
 /** Views in menu order. `feature` hides a view while that feature is off, like on the phone. */
 const VIEWS = [
@@ -23,6 +24,7 @@ const VIEWS = [
   { path: 'seguimientos', label: 'Esperando', render: renderFollowups, group: 'Tareas' },
   { path: 'habitos', label: 'Hábitos', render: renderHabits },
   { path: 'resumen', label: 'Resumen', render: renderReview, feature: 'review_zoom' },
+  { path: 'dinero', label: 'Dinero', render: renderMoney, feature: 'budget_cloud' },
   { path: 'salud', label: 'Salud', render: renderHealth, feature: 'health_connect' },
   { path: 'ajustes', label: 'Ajustes', render: renderSettings },
 ];

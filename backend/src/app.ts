@@ -44,6 +44,7 @@ import {
   counterEntries,
   setGoals,
   goals,
+  budgetSummary,
   listTasks,
   moveTask,
   planTask,
@@ -391,6 +392,12 @@ app.get('/api/review', async (c) =>
 );
 
 app.get('/api/health', async (c) => c.json(await healthSummary(c.env.DB, today(c), c.req.query('from'), c.req.query('to'))));
+
+app.get('/api/budget', async (c) => {
+  const day = c.req.query('day');
+  if (day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ValidationError('day must be YYYY-MM-DD');
+  return c.json(await budgetSummary(c.env.DB, day));
+});
 
 app.get('/api/features', async (c) => c.json({ items: await listFeatures(c.env.DB) }));
 app.put('/api/features/:key', async (c) => {

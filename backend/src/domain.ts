@@ -744,6 +744,55 @@ export function healthAverages(days: HealthDay[]) {
   };
 }
 
+// Money -----------------------------------------------------------------------------
+
+const BUDGET_STATUSES = ['late', 'soon', 'partial', 'upcoming', 'reserved', 'paid', 'skipped', 'missed'] as const;
+
+function parseList(value: unknown): unknown[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function budgetFromRow(row: Row) {
+  const record = toRecord('budget_cycles', row) as Record<string, unknown>;
+  const lines = parseList(record.lines).map((line) => {
+    const item = (line ?? {}) as Record<string, unknown>;
+    return {
+      id: String(item.id ?? ''),
+      name: String(item.name ?? ''),
+      cap: item.cap === true,
+      expected: Number(item.expected ?? 0),
+      paid: Number(item.paid ?? 0),
+      logged: Number(item.logged ?? 0),
+      status: (BUDGET_STATUSES as readonly string[]).includes(String(item.status)) ? String(item.status) : 'upcoming',
+      due: typeof item.due === 'string' ? item.due : null,
+      frequency: Number(item.frequency ?? 1),
+    };
+  });
+  const categories = parseList(record.categories).map((category) => {
+    const item = (category ?? {}) as Record<string, unknown>;
+    return { key: String(item.key ?? ''), label: String(item.label ?? item.key ?? ''), cents: Number(item.cents ?? 0) };
+  });
+  return { ...record, lines, caps: lines.filter((line) => line.cap), categories, updated_at: Number(row.updated_at) } as unknown as Record<string, unknown> & { start: string; end: string };
+}
+
+/**
+ * The money summary the phone uploads per payday-to-payday cycle: the cycle containing `day` (default
+ * the latest one) and the list of cycles available. Amounts are cents. Nothing here comes from the
+ * bank directly; movements stay on the phone.
+ */
+export async function budgetSummary(db: D1Database, day?: string) {
+  const { results } = await db.prepare(`SELECT * FROM budget_cycles WHERE deleted = 0 ORDER BY start DESC LIMIT 36`).all<Row>();
+  const cycles = results.map(budgetFromRow);
+  const cycle = day ? cycles.find((item) => item.start <= day && day <= item.end) ?? null : cycles[0] ?? null;
+  return { cycle, cycles: cycles.map((item: Record<string, unknown>) => ({ start: item.start, end: item.end, current: item.current, available: item.available, saved: item.saved, savings_at_close: item.savings_at_close })) };
+}
+
 // Features ------------------------------------------------------------------------
 
 /**
@@ -763,6 +812,12 @@ export const FEATURES = [
     key: 'task_kanban',
     title: 'Tablero Kanban en Tareas',
     description: 'Un segmento Kanban en Tareas con stack infinito, prioridad, baúl y fracasos, y el contador de tareas hechas.',
+    default: false,
+  },
+  {
+    key: 'budget_cloud',
+    title: 'Dinero en la web',
+    description: 'El móvil sube el resumen de cada ciclo (presupuesto, topes y gasto por categoría) para verlo en la web. Los movimientos y las credenciales no salen del teléfono.',
     default: false,
   },
   {
