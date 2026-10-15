@@ -68,6 +68,19 @@ export const TABLES = {
       value: { type: 'text', required: true, max: 5000 },
     },
   },
+  /** One row per day, id = the day. Written by the phone from Health Connect. */
+  health_days: {
+    fields: {
+      day: { type: 'day', required: true },
+      sleep_minutes: { type: 'int' },
+      sleep_start: { type: 'int' },
+      sleep_end: { type: 'int' },
+      steps: { type: 'int' },
+      exercise_minutes: { type: 'int' },
+      resting_hr: { type: 'int' },
+      source: { type: 'text', max: 100 },
+    },
+  },
 } as const satisfies Record<string, TableSpec>;
 
 export type TableName = keyof typeof TABLES;

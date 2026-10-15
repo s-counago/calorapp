@@ -48,6 +48,7 @@ import {
   updateTask,
   type ImportItem,
   review,
+  healthSummary,
   listFeatures,
   setFeature,
   type ReviewPeriod,
@@ -349,6 +350,8 @@ app.get('/api/day', async (c) => c.json(await daySummary(c.env.DB, dayQuery(c)))
 app.get('/api/review', async (c) =>
   c.json(await review(c.env.DB, dayQuery(c), c.env.TIME_ZONE, (c.req.query('period') ?? 'week') as ReviewPeriod)),
 );
+
+app.get('/api/health', async (c) => c.json(await healthSummary(c.env.DB, today(c), c.req.query('from'), c.req.query('to'))));
 
 app.get('/api/features', async (c) => c.json({ items: await listFeatures(c.env.DB) }));
 app.put('/api/features/:key', async (c) => {

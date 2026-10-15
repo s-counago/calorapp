@@ -16,6 +16,7 @@ Solo entra una cuenta de Google, la de `ALLOWED_EMAIL`. La banca no pasa por aqu
 | `habits`, `habit_checks` | Hábitos con objetivo semanal y una fila por día hecho (`<habit_id>:<día>`). |
 | `metric_entries` | Calorías, proteína y cigarros como entradas sueltas (+300 kcal a las 14:02), no como un total. |
 | `settings` | Objetivos diarios (`calorie_goal`, `protein_goal`, `cigarette_goal`) y `tasks_done_base`, las tareas hechas antes del tablero (el contador de Notion). |
+| `health_days` | Una fila por día (el id es el propio día) con lo que el móvil lee de Health Connect: minutos dormidos la noche que acaba ese día, inicio y fin del sueño, pasos, minutos de ejercicio y pulso en reposo. Solo la escribe el teléfono. |
 | `devices` | Teléfonos con sesión iniciada; solo se guarda el hash del token. |
 
 ## Sincronización
@@ -51,6 +52,7 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | `PUT /api/counters` | `{ "kind", "total", "day" }`: fija el total de un día (añade la diferencia como corrección). Para días olvidados. |
 | `GET /api/day?day=` | Contadores frente a objetivos, plan por franjas y hábitos del día. |
 | `GET /api/review?day=&period=` | Revisión de la semana (lunes a domingo, `period=week`, por defecto) o del mes (`period=month`) que contiene ese día. |
+| `GET /api/health?from=&to=` | Sueño, pasos, ejercicio y pulso en reposo por día (`health_days`) y sus medias. Por defecto, los 7 días que acaban hoy; como mucho un año. `GET /api/day` y `GET /api/review` también los incluyen en `health`. |
 | `GET /api/features` | Funciones activables de las apps y si están encendidas. |
 | `PUT /api/features/<clave>` | `{ "enabled": true \| false }`: enciende o apaga una función. Se guarda como el ajuste `feature:<clave>`. |
 | `GET /api/devices`, `DELETE /api/devices/<id>` | Dispositivos con sesión. |
@@ -62,7 +64,7 @@ Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
 
 ## MCP
 
-Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `board_summary`, `set_done_total`, `import_tasks`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `set_counter`, `day_summary`, `weekly_review` (semana o mes), `list_features` y `set_feature`.
+Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `board_summary`, `set_done_total`, `import_tasks`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `set_counter`, `day_summary`, `weekly_review` (semana o mes), `health_days` (sueño, pasos, ejercicio y pulso del reloj), `list_features` y `set_feature`.
 
 Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 

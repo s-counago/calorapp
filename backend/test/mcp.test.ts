@@ -101,7 +101,7 @@ describe('mcp', () => {
 
     const { result: list } = await rpc(token, 'tools/list');
     expect(list.tools.map((entry: any) => entry.name)).toEqual(
-      expect.arrayContaining(['list_tasks', 'create_task', 'complete_task', 'check_habit', 'log_counter', 'day_summary', 'weekly_review']),
+      expect.arrayContaining(['list_tasks', 'create_task', 'complete_task', 'check_habit', 'log_counter', 'day_summary', 'weekly_review', 'health_days']),
     );
 
     const created = await tool(token, 'create_task', { title: 'Revisar presupuesto', plan_date: '2026-10-14', plan_slot: 'evening' });
@@ -130,6 +130,9 @@ describe('mcp', () => {
 
     const month = await tool(token, 'weekly_review', { day: '2026-10-14', period: 'month' });
     expect(month.structuredContent).toMatchObject({ period: 'month', start: '2026-10-01', end: '2026-10-31' });
+
+    const health = await tool(token, 'health_days', { from: '2026-10-08', to: '2026-10-14' });
+    expect(health.structuredContent).toMatchObject({ from: '2026-10-08', to: '2026-10-14', days_with_data: 0, per_day: [] });
 
     const features = await tool(token, 'list_features');
     expect(features.structuredContent.items).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'review_zoom', enabled: false })]));

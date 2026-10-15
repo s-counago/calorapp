@@ -32,6 +32,7 @@ import {
   REVIEW_PERIODS,
   listFeatures,
   review,
+  healthSummary,
   setFeature,
   type ReviewPeriod,
   type MetricKind,
@@ -297,6 +298,24 @@ const TOOLS: Tool[] = [
       properties: { day, period: { type: 'string', enum: [...REVIEW_PERIODS], description: 'week (default) or month.' } },
     },
     run: (env, args) => review(env.DB, dayArg(env, args.day), env.TIME_ZONE, (args.period ?? 'week') as ReviewPeriod),
+  },
+  {
+    name: 'health_days',
+    title: 'Sleep, steps and exercise',
+    description:
+      'What the phone read from Health Connect (Pixel Watch) per day: sleep_minutes (time asleep in the night that ends on that day, ' +
+      'awake stages left out; sleep_start and sleep_end are epoch ms), steps, exercise_minutes and resting_hr (beats per minute), ' +
+      'plus averages over the days that have each value. Steps and exercise count from 03:00 to 03:00. ' +
+      'Defaults to the 7 days ending today; at most a year. Days without data are left out. Read only: the phone writes these.',
+    readOnly: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: { ...day, description: 'First day (YYYY-MM-DD). Defaults to 6 days before `to`.' },
+        to: { ...day, description: 'Last day (YYYY-MM-DD). Defaults to today.' },
+      },
+    },
+    run: (env, args) => healthSummary(env.DB, today(env), args.from, args.to),
   },
   {
     name: 'list_features',
