@@ -74,6 +74,21 @@ export const TABLES = {
       value: { type: 'text', required: true, max: 5000 },
     },
   },
+  /** El cajón: raw captures from the phone (see migration 0008). */
+  captures: {
+    fields: {
+      text: { type: 'text', required: true, max: 20000 },
+      url: { type: 'text', max: 2000 },
+      title: { type: 'text', max: 500 },
+      source: { type: 'text', max: 50 },
+      status: { type: 'text', values: ['new', 'kept', 'filed', 'archived'], default: 'new' },
+      kind: { type: 'text', values: ['note', 'idea', 'link', 'task', 'other'] },
+      tags: { type: 'text', max: 500 },
+      task_id: { type: 'text', max: 100 },
+      suggestion: { type: 'text', max: 5000 },
+      created_at: { type: 'int', required: true },
+    },
+  },
   /** One row per day, id = the day. Written by the phone from Health Connect. */
   health_days: {
     fields: {

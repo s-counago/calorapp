@@ -77,6 +77,7 @@ describe('api', () => {
       expect.objectContaining({ key: 'review_zoom', enabled: false, default: false }),
       expect.objectContaining({ key: 'task_kanban', enabled: false, default: false }),
       expect.objectContaining({ key: 'habit_tasks', enabled: false, default: false }),
+      expect.objectContaining({ key: 'captures', enabled: false, default: false }),
       expect.objectContaining({ key: 'focus_note', enabled: false, default: false }),
       expect.objectContaining({ key: 'health_connect', enabled: false, default: false }),
     ]);
