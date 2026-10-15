@@ -933,7 +933,7 @@ final class BudgetView extends LinearLayout {
         dots.set(statuses, animateNext);
         month.addView(dots, spaced(0, 12));
         Budget.Line next = null;
-        for (Budget.Line line : cycle.lines) if (!line.done() && (next == null || line.due < next.due)) next = line;
+        for (Budget.Line line : cycle.lines) if (!line.done() && !line.rule.cap && (next == null || line.due < next.due)) next = line;
         View nextRow = null;
         if (next != null && cycle.current) {
             final Budget.Line upcoming = next;
@@ -1044,6 +1044,11 @@ final class BudgetView extends LinearLayout {
     }
 
     private static String statusLine(Budget.Cycle cycle, Budget.Line line) {
+        if (line.rule.cap && line.status != Budget.SKIPPED) {
+            String spent = (cycle.current ? "Llevas " : "Gastaste ") + Budget.money(Math.max(0, line.paid)) + " de " + Budget.money(line.expected, false);
+            if (line.paid > line.expected) return spent + " · te pasas " + Budget.money(line.paid - line.expected, false);
+            return cycle.current ? spent + " · quedan " + Budget.money(line.expected - Math.max(0, line.paid), false) : spent;
+        }
         switch (line.status) {
             case Budget.RESERVED:
                 return "Apartas " + Budget.money(line.reserve()) + " · próximo hacia el " + Budget.date(line.due);
@@ -1098,7 +1103,7 @@ final class BudgetView extends LinearLayout {
         Context c = getContext();
         PausaUi.Sheet sheet = new PausaUi.Sheet(c, line.rule.name);
         String status = statusLine(cycle, line);
-        sheet.subtitle(status.contains("suele ser") ? status : status + " · habitual " + Budget.money(line.expected) + (line.rule.invest ? " por ciclo" : ""));
+        sheet.subtitle(status.contains("suele ser") || line.rule.cap ? status : status + " · habitual " + Budget.money(line.expected) + (line.rule.invest ? " por ciclo" : ""));
         int n = Math.min(5, line.history.length);
         long[] values = new long[n + 1];
         String[] labels = new String[n + 1];
@@ -1118,8 +1123,11 @@ final class BudgetView extends LinearLayout {
             amount.setContentDescription("Cambiar el importe de " + line.rule.name + " este ciclo: " + Budget.money(line.expected));
             sheet.add(amount, 12);
         }
-        if (line.entries.isEmpty()) sheet.add(note(cycle.current ? "Aún no ha pasado por tus cuentas en este ciclo." : "No hubo cargos en este ciclo."), 8);
-        else for (Budget.Entry entry : line.entries) sheet.add(entryRow(entry, () -> { sheet.dismiss(); classify(entry); }), 2);
+        if (line.rule.cap) capLogs(sheet, cycle, line);
+        if (line.entries.isEmpty()) {
+            if (!line.rule.cap || line.logged == 0)
+                sheet.add(note(cycle.current ? "Aún no ha pasado por tus cuentas en este ciclo." : "No hubo cargos en este ciclo."), 8);
+        } else for (Budget.Entry entry : line.entries) sheet.add(entryRow(entry, () -> { sheet.dismiss(); classify(entry); }), 2);
         String key = Budget.skipKey(line.rule, cycle.period);
         boolean skipped = snapshot.settings.skipped.contains(key);
         Button skip = PausaUi.quiet(c, skipped ? "Sí toca este ciclo" : "Este ciclo no toca", PausaUi.GREEN, () -> {
@@ -1129,8 +1137,59 @@ final class BudgetView extends LinearLayout {
             });
         });
         if (line.paid > 0 || !cycle.current) skip = null;
+        if (line.rule.cap && cycle.current) skip = PausaUi.quiet(c, "Apuntar gasto", PausaUi.GREEN, () -> { sheet.dismiss(); logSheet(line.rule); });
         sheet.footer(skip, PausaUi.action(c, "Editar", true, () -> { sheet.dismiss(); ruleEditor(line.rule, null); }));
         sheet.show();
+    }
+
+    /** What was logged by hand on a cap this cycle; touching one removes it. */
+    private void capLogs(PausaUi.Sheet sheet, Budget.Cycle cycle, Budget.Line line) {
+        if (cycle.current) sheet.add(note("Las compras que lleven «" + line.rule.name + "» dentro de otro ticket, apúntalas aquí: "
+                + "pasan del gasto libre a este tope."), 8);
+        for (long[] log : line.rule.logs) {
+            if (!cycle.period.contains((int) log[0])) continue;
+            final long day = log[0], cents = log[1];
+            View row = settingRow("Apuntado el " + Budget.date((int) day), Budget.money(cents) + " · quitar", () -> {
+                sheet.dismiss();
+                change("Apunte quitado de " + line.rule.name, s -> {
+                    Budget.Rule rule = s.rule(line.rule.id);
+                    if (rule == null) return;
+                    for (long[] other : rule.logs) if (other[0] == day && other[1] == cents) { rule.logs.remove(other); break; }
+                });
+            });
+            row.setContentDescription("Quitar el apunte de " + Budget.money(cents) + " del " + Budget.date((int) day));
+            sheet.add(row, 2);
+        }
+    }
+
+    /** Logs an amount spent on a cap inside another purchase, with cents: "6,40". */
+    private void logSheet(Budget.Rule cap) {
+        Context c = getContext();
+        PausaUi.Sheet sheet = new PausaUi.Sheet(c, "Apuntar en " + cap.name);
+        sheet.subtitle("Lo que gastaste en esto dentro de otra compra. Sale del gasto libre y cuenta en el tope.");
+        EditText input = new EditText(c);
+        PausaUi.input(input);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setTextSize(28);
+        input.setTypeface(Typeface.create("serif", Typeface.NORMAL));
+        input.setSingleLine(true);
+        input.setHint("0,00");
+        input.setContentDescription("Importe en euros");
+        sheet.add(input, 10);
+        sheet.footer(null, PausaUi.action(c, "Apuntar", true, () -> {
+            long cents;
+            try {
+                cents = Ledger.cents(input.getText().toString().trim().replace(",", "."));
+                if (cents <= 0) throw new NumberFormatException();
+            } catch (Exception error) { input.setError("Introduce un importe, por ejemplo 6,40"); return; }
+            sheet.dismiss();
+            change("+" + Budget.money(cents) + " en " + cap.name, s -> {
+                Budget.Rule rule = s.rule(cap.id);
+                if (rule != null) rule.logs.add(new long[]{today(), cents});
+            });
+        }));
+        TaskSheets.showWithKeyboard(sheet);
+        input.requestFocus();
     }
 
     /** How much a fixed line is this cycle, or from now on. Quick choices come from what was actually paid. */
@@ -1753,6 +1812,17 @@ final class BudgetView extends LinearLayout {
         useRange.setListener(checked -> showRange.run());
         rangeToggle.setOnClickListener(v -> useRange.performClick());
         showRange.run();
+        PausaUi.Check capCheck = new PausaUi.Check(c, PausaUi.SAGE);
+        capCheck.setChecked(existing != null && existing.cap);
+        capCheck.setContentDescription("Es un tope: reserva el importe todo el ciclo");
+        LinearLayout capRow = new LinearLayout(c);
+        capRow.setGravity(Gravity.CENTER_VERTICAL);
+        capRow.setBackground(PausaUi.ripple(c, PausaUi.CREAM, 18));
+        capRow.setPadding(dp(4), 0, dp(14), 0);
+        capRow.addView(capCheck, new LayoutParams(dp(48), dp(48)));
+        capRow.addView(PausaUi.text(c, "Es un tope: reserva el importe todo el ciclo, aunque sean muchas compras pequeñas o vayan dentro de otros tickets", 14, PausaUi.INK, false), new LayoutParams(0, -2, 1));
+        capRow.setOnClickListener(v -> capCheck.performClick());
+        if (existing == null || !existing.invest) sheet.add(capRow, 12);
         final int[] months = {existing != null ? existing.frequency : 1};
         int[] options = {1, 3, 12};
         sheet.add(PausaUi.text(c, "Cada cuánto se cobra", 12, PausaUi.MUTED, true), 6);
@@ -1810,7 +1880,8 @@ final class BudgetView extends LinearLayout {
             if (title.isEmpty()) { name.setError("Ponle un nombre"); return; }
             List<String> keys = new ArrayList<>();
             for (String part : keywords.getText().toString().split(",")) if (!Ledger.key(part).isEmpty()) keys.add(Ledger.key(part));
-            if (keys.isEmpty() && (existing == null || !existing.invest)) { keywords.setError("Añade un texto que aparezca en el concepto"); return; }
+            boolean isCap = capCheck.isChecked() && (existing == null || !existing.invest);
+            if (keys.isEmpty() && !isCap && (existing == null || !existing.invest)) { keywords.setError("Añade un texto que aparezca en el concepto"); return; }
             long min = -1, max = -1;
             if (useRange.isChecked()) {
                 try {
@@ -1828,7 +1899,8 @@ final class BudgetView extends LinearLayout {
                     s.rules.add(rule);
                 }
                 rule.name = title; rule.symbol = symbol[0]; rule.expected = cents; rule.day = dayOfMonth; rule.frequency = months[0];
-                rule.learn = learn.isChecked();
+                rule.learn = learn.isChecked() && !isCap;
+                rule.cap = isCap;
                 rule.min = minAmount; rule.max = maxAmount;
                 if (!rule.invest) { rule.keywords.clear(); rule.keywords.addAll(keys); }
                 if (from != null) s.txn.put(from.txn.id, "rule:" + rule.id);

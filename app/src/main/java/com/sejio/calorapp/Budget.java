@@ -20,7 +20,7 @@ import java.util.Set;
  */
 final class Budget {
     static final int LATE = 0, SOON = 1, PARTIAL = 2, UPCOMING = 3, RESERVED = 4, PAID = 5, SKIPPED = 6, MISSED = 7;
-    static final int VERSION = 2;
+    static final int VERSION = 3;
 
     // ------------------------------------------------------------ settings
 
@@ -31,6 +31,13 @@ final class Budget {
         /** Day of the month and months between charges (1 monthly, 3 quarterly, 12 yearly). */
         int day = 1, frequency = 1;
         boolean invest, learn = true, enabled = true;
+        /**
+         * A cap (tope) keeps its whole amount reserved all cycle, however many small purchases it takes, and
+         * charges assigned to it spend from that reserve. Keywords are optional: amounts the owner logs by hand
+         * ({day, cents}, for things bought inside a bigger receipt) move out of free spending into the cap.
+         */
+        boolean cap;
+        final List<long[]> logs = new ArrayList<>();
 
         Rule(String id, String name, String symbol, long expected, int day, String... keywords) {
             this.id = id; this.name = name; this.symbol = symbol; this.expected = expected; this.day = day;
@@ -39,6 +46,7 @@ final class Budget {
 
         Rule range(long min, long max) { this.min = min; this.max = max; return this; }
         Rule every(int months) { frequency = Math.max(1, months); return this; }
+        Rule capped() { cap = true; learn = false; return this; }
 
         boolean matches(Entry entry) {
             if (!enabled) return false;
@@ -59,7 +67,13 @@ final class Budget {
             for (String keyword : keywords) words.put(keyword);
             return new JSONObject().put("id", id).put("name", name).put("symbol", symbol).put("keywords", words)
                     .put("expected", expected).put("day", day).put("frequency", frequency).put("min", min).put("max", max)
-                    .put("invest", invest).put("learn", learn).put("enabled", enabled);
+                    .put("invest", invest).put("learn", learn).put("enabled", enabled).put("cap", cap).put("logs", logsJson());
+        }
+
+        private JSONArray logsJson() throws Exception {
+            JSONArray list = new JSONArray();
+            for (long[] log : logs) list.put(new JSONArray().put(log[0]).put(log[1]));
+            return list;
         }
 
         static Rule fromJson(JSONObject json) throws Exception {
@@ -71,6 +85,10 @@ final class Budget {
             rule.frequency = Math.max(1, json.optInt("frequency", 1));
             rule.invest = json.optBoolean("invest"); rule.learn = json.optBoolean("learn", true);
             rule.enabled = json.optBoolean("enabled", true);
+            rule.cap = json.optBoolean("cap");
+            JSONArray logs = json.optJSONArray("logs");
+            if (logs != null) for (int i = 0; i < logs.length(); i++)
+                rule.logs.add(new long[]{logs.getJSONArray(i).getLong(0), logs.getJSONArray(i).getLong(1)});
             return rule;
         }
     }
@@ -93,11 +111,17 @@ final class Budget {
         rules.add(new Rule("obsidian", "Obsidian", "note", 630, 1, "OBSIDIAN"));
         rules.add(new Rule("prime", "Amazon Prime", "box", 499, 25, "AMAZON PRIME"));
         rules.add(cig());
+        rules.add(tabaco());
+        rules.add(proteina());
         return rules;
     }
 
     /** Charged through Google Play, hence the amount range: other Google charges stay free spending. */
     private static Rule spotify() { return new Rule("google", "Spotify", "music", 649, 24, "GOOGLE").range(550, 750); }
+    /** June–September 2026 ran 66–91 € a month at tobacconists; 95 € leaves room for cash and bar machines. */
+    private static Rule tabaco() { return new Rule("tabaco", "Tabaco", "spark", 9_500, 1, "ESTANCO", "EXPENDEDURIA").capped(); }
+    /** Protein milk (about 40 € a month, often inside a supermarket receipt) and powder (about 50 € every two months). */
+    private static Rule proteina() { return new Rule("proteina", "Proteína", "dumbbell", 9_000, 1, "HSN").capped(); }
     private static Rule cig() { return new Rule("cig", "Cuota CIG", "people", 2_019, 5, "INTERSINDICAL", "CUOTA CIG").every(3); }
 
     /**
@@ -194,6 +218,7 @@ final class Budget {
             if (moves != null) for (int i = 0; i < moves.length(); i++)
                 settings.cushionMoves.add(new long[]{moves.getJSONArray(i).getLong(0), moves.getJSONArray(i).getLong(1)});
             if (json.optInt("version", 1) < 2) settings.upgradeToTwo();
+            if (json.optInt("version", 1) < 3) settings.upgradeToThree();
             return settings;
         }
 
@@ -204,6 +229,12 @@ final class Budget {
             for (Rule rule : new ArrayList<>(rules)) if (rule.invest && rule.id.equals("inversion")) rules.remove(rule);
             for (Map.Entry<String, String> entry : new ArrayList<>(txn.entrySet())) if (entry.getValue().equals("rule:inversion")) txn.remove(entry.getKey());
             if (rule("cig") == null) rules.add(cig());
+        }
+
+        /** Version 3: caps for tobacco and protein, so free money never counts on what they will take. */
+        private void upgradeToThree() {
+            if (rule("tabaco") == null) rules.add(tabaco());
+            if (rule("proteina") == null) rules.add(proteina());
         }
 
         static Settings defaults() {
@@ -370,6 +401,8 @@ final class Budget {
         final Rule rule;
         final List<Entry> entries = new ArrayList<>();
         long paid, expected;
+        /** Of paid, what the owner logged by hand on a cap this cycle. */
+        long logged;
         int status, due, paidDay = -1, lastPaidDay = -1;
         /** expected was set by the owner for this cycle rather than learned. */
         boolean planned;
@@ -412,6 +445,8 @@ final class Budget {
         int index, count, today;
         boolean current, salaryEstimated;
         long salary, otherIncome, fixedPaid, fixedPending, freeSpent, freeOutflow, previousAtSameDay = -1, averageDaily = -1;
+        /** Spending logged by hand on caps: it already left the accounts as free spending, so it moves out of it. */
+        long logged;
         /** Savings: what the owner put aside (TR purchases minus saveback), the gift and the target for the cycle. */
         long saved, gift, savingsTarget, invested, toCushion;
         /** Unexpected obligations and how much of them the cushion absorbed; cushion balance -1 when not set. */
@@ -515,6 +550,13 @@ final class Budget {
                 line.paid -= entry.txn.cents;
                 if (entry.txn.cents < 0 && (line.paidDay < 0 || entry.txn.day < line.paidDay)) line.paidDay = entry.txn.day;
             }
+            if (rule.cap) for (long[] log : rule.logs) {
+                if (!period.contains((int) log[0])) continue;
+                line.logged += log[1];
+                cycle.daily[(int) log[0] - period.start] -= log[1];
+            }
+            line.paid += line.logged;
+            cycle.logged += line.logged;
             learn(snapshot, index, line);
             Long plan = settings.planned.get(skipKey(rule, period));
             if (plan != null) { line.expected = plan; line.planned = true; }
@@ -530,6 +572,8 @@ final class Budget {
             else if (snapshot.today > line.due + 3) line.status = LATE;
             else if (line.due - snapshot.today <= 3) line.status = SOON;
             else line.status = UPCOMING;
+            // A cap stays open, keeping the rest of its amount reserved, until it is used up; closed cycles count what was spent.
+            if (rule.cap && !skipped) line.status = cycle.current && line.paid < line.expected ? PARTIAL : PAID;
             // A line never matched in this cycle nor before is not shown as missed in old cycles.
             if (line.status == MISSED && line.history.length == 0) continue;
             cycle.lines.add(line);
@@ -596,6 +640,8 @@ final class Budget {
                 stat[0]++; stat[1] += spend;
             }
         }
+        cycle.freeSpent -= cycle.logged;
+        cycle.freeOutflow = Math.max(0, cycle.freeOutflow - cycle.logged);
         cycle.slices.addAll(slices.values());
         Collections.sort(cycle.slices, (a, b) -> Long.compare(b.cents, a.cents));
         String best = null;
@@ -646,7 +692,7 @@ final class Budget {
         line.history = new long[history.size()];
         for (int i = 0; i < history.size(); i++) line.history[i] = history.get(i);
         List<Long> recent = amounts.subList(Math.max(0, amounts.size() - 3), amounts.size());
-        line.expected = line.rule.learn && !recent.isEmpty() ? median(recent) : line.rule.expected;
+        line.expected = line.rule.learn && !line.rule.cap && !recent.isEmpty() ? median(recent) : line.rule.expected;
         if (line.rule.frequency > 1 && line.lastPaidDay >= 0) {
             int next = line.lastPaidDay;
             while (next < period.start) next = addMonths(next, line.rule.frequency);
