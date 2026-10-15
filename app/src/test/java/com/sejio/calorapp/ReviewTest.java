@@ -54,6 +54,9 @@ public final class ReviewTest {
         assertEquals(7, s.days.length);
         assertEquals(2600, s.days[1][0]);
         assertEquals(4, s.elapsed());
+        // Wednesday was skipped; Thursday (today) is still running and does not count as missing.
+        assertEquals(1, s.daysMissing());
+        assertTrue(s.proteinLogged());
     }
 
     @Test public void habitTargetsScaleToTheMonthAndTheWeakestComeFirst() {

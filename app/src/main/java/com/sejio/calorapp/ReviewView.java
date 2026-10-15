@@ -134,21 +134,23 @@ final class ReviewView extends LinearLayout {
         clear(health);
         if (s.daysLogged == 0) { line(health, s.elapsed() == 0 ? "Aún no ha empezado." : "Nada apuntado en este periodo.", PausaUi.MUTED); return; }
         DayBars bars = new DayBars(activity, s);
-        LayoutParams params = new LayoutParams(-1, dp(s.period == Review.WEEK ? 96 : 80));
+        LayoutParams params = new LayoutParams(-1, dp(96));
         params.topMargin = dp(4); params.bottomMargin = dp(10);
         health.addView(bars, params);
         line(health, s.daysWithinCalories + " de " + s.daysLogged + (s.daysLogged == 1 ? " día" : " días")
                 + " dentro del límite · media " + PausaUi.number(s.averageCalories) + " kcal", PausaUi.INK);
-        line(health, "Proteína media " + s.averageProtein + " g de " + s.proteinGoal + " · "
-                + s.daysReachingProtein + (s.daysReachingProtein == 1 ? " día" : " días") + " con objetivo", PausaUi.INK);
+        if (s.proteinLogged())
+            line(health, "Proteína media " + s.averageProtein + " g de " + s.proteinGoal + " · "
+                    + s.daysReachingProtein + (s.daysReachingProtein == 1 ? " día" : " días") + " con objetivo", PausaUi.INK);
+        else line(health, "Proteína sin apuntar", PausaUi.MUTED);
         String cigarettes = "Cigarros " + Review.oneDecimal(s.cigarettesPerDay) + " al día (objetivo " + s.cigaretteGoal + ")";
         if (s.previousCigarettesPerDay >= 0) {
             double delta = s.cigarettesPerDay - s.previousCigarettesPerDay;
             if (Math.abs(delta) >= .05) cigarettes += " · " + Review.oneDecimal(Math.abs(delta)) + (delta < 0 ? " menos" : " más") + " que antes";
         }
         line(health, cigarettes, s.cigarettesPerDay > s.cigaretteGoal ? PausaUi.TERRACOTTA : PausaUi.INK);
-        if (s.daysLogged < s.elapsed())
-            line(health, (s.elapsed() - s.daysLogged) + (s.elapsed() - s.daysLogged == 1 ? " día" : " días") + " sin apuntar", PausaUi.MUTED);
+        int missing = s.daysMissing();
+        if (missing > 0) line(health, missing + (missing == 1 ? " día" : " días") + " sin apuntar", PausaUi.MUTED);
     }
 
     private void renderHabits(Review.Summary s) {
@@ -166,9 +168,9 @@ final class ReviewView extends LinearLayout {
             row.addView(PausaUi.text(activity, habit.done + "/" + habit.target, 13, habit.met() ? PausaUi.SAGE : PausaUi.MUTED, true),
                     new LayoutParams(-2, -2));
             habits.addView(row, new LayoutParams(-1, -2));
-            Meters.Bar bar = new Meters.Bar(activity);
-            bar.setProgress(habit.done, habit.target);
-            habits.addView(bar, new LayoutParams(-1, -2));
+            LayoutParams barParams = new LayoutParams(-1, dp(6));
+            barParams.topMargin = dp(4);
+            habits.addView(new ThinBar(activity, habit.done, habit.target), barParams);
         }
     }
 
@@ -263,6 +265,30 @@ final class ReviewView extends LinearLayout {
 
     private int dp(int value) { return PausaUi.dp(activity, value); }
 
+    /** A quiet progress line for habits: sage when met, no handle, nothing to drag. */
+    static final class ThinBar extends View {
+        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private final float ratio;
+
+        ThinBar(Context c, int value, int goal) {
+            super(c);
+            ratio = goal <= 0 ? 0 : Math.min(1f, value / (float) goal);
+            track.setColor(PausaUi.NEUTRAL);
+            fill.setColor(value >= goal ? PausaUi.SAGE : 0xFF8FA883);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float r = getHeight() / 2f;
+            rect.set(0, 0, getWidth(), getHeight());
+            canvas.drawRoundRect(rect, r, r, track);
+            if (ratio <= 0) return;
+            rect.set(0, 0, Math.max(getHeight(), getWidth() * ratio), getHeight());
+            canvas.drawRoundRect(rect, r, r, fill);
+        }
+    }
+
     /** Calories per day against the limit: sage under it, terracotta over it, a dashed line at the limit. */
     static final class DayBars extends View {
         private final Review.Summary summary;
@@ -291,7 +317,7 @@ final class ReviewView extends LinearLayout {
         @Override protected void onDraw(Canvas canvas) {
             int count = summary.days.length;
             boolean week = summary.period == Review.WEEK;
-            float labels = week ? PausaUi.dp(getContext(), 16) : 0;
+            float labels = PausaUi.dp(getContext(), 16);
             float height = getHeight() - labels, width = getWidth();
             float slot = width / count, gap = Math.max(1, slot * (week ? .3f : .2f));
             int max = summary.calorieGoal;
@@ -301,10 +327,12 @@ final class ReviewView extends LinearLayout {
             for (int i = 0; i < count; i++) {
                 int calories = summary.days[i][0];
                 float left = i * slot + gap / 2, right = (i + 1) * slot - gap / 2;
+                if (week || i % 7 == 0)
+                    canvas.drawText(week ? WEEKDAYS[i] : String.valueOf(i + 1), (left + right) / 2, getHeight() - PausaUi.dp(getContext(), 2), label);
+                if (summary.start + i > summary.today) continue; // Days still to come stay blank.
                 float top = calories > 0 ? height - calories * scale : height - PausaUi.dp(getContext(), 3);
                 rect.set(left, top, right, height);
                 canvas.drawRoundRect(rect, radius, radius, calories <= 0 ? empty : calories > summary.calorieGoal ? over : under);
-                if (week) canvas.drawText(WEEKDAYS[i], (left + right) / 2, getHeight() - PausaUi.dp(getContext(), 2), label);
             }
             float y = height - summary.calorieGoal * scale;
             canvas.drawLine(0, y, width, y, limit);

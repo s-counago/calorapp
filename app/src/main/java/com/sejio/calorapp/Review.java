@@ -61,6 +61,17 @@ final class Review {
         boolean current() { return today >= start && today <= end; }
         /** Days of the period that have started, so a Tuesday is not judged as a whole week. */
         int elapsed() { return current() ? today - start + 1 : today < start ? 0 : length(); }
+        /** Finished days (today excluded while it is still running) with nothing logged. */
+        int daysMissing() {
+            int finished = current() ? today - start : elapsed(), missing = 0;
+            for (int i = 0; i < finished && i < days.length; i++)
+                if (days[i][0] <= 0 && days[i][1] <= 0 && days[i][2] <= 0) missing++;
+            return missing;
+        }
+        boolean proteinLogged() {
+            for (int[] day : days) if (day[1] > 0) return true;
+            return false;
+        }
         int habitsMet() {
             int count = 0;
             for (HabitLine habit : habits) if (habit.met()) count++;
