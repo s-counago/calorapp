@@ -44,6 +44,8 @@ import {
   planTask,
   habitToTask,
   tasksOverview,
+  getFocusNote,
+  setFocusNote,
   addDays,
   currentDay,
   logMetric,
@@ -363,6 +365,12 @@ app.put('/api/counters', async (c) => {
   const body = await c.req.json<{ kind?: MetricKind; total?: unknown; day?: string }>();
   const day = body.day ?? today(c);
   return c.json(await setMetricTotal(c.env.DB, body.kind as MetricKind, body.total as number, day));
+});
+
+app.get('/api/note', async (c) => c.json({ note: await getFocusNote(c.env.DB, today(c)) }));
+app.put('/api/note', async (c) => {
+  const body = await c.req.json<{ text?: unknown; until?: unknown }>();
+  return c.json({ note: await setFocusNote(c.env.DB, body.text, body.until, today(c)) });
 });
 
 app.get('/api/day', async (c) => c.json(await daySummary(c.env.DB, dayQuery(c))));

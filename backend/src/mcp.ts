@@ -32,6 +32,9 @@ import {
   planTask,
   habitToTask,
   tasksOverview,
+  getFocusNote,
+  setFocusNote,
+  MAX_NOTE,
   addDays,
   type ImportItem,
   FEATURES,
@@ -320,6 +323,33 @@ const TOOLS: Tool[] = [
       const day = args.day === undefined || args.day === 'today' ? today(env) : args.day === 'tomorrow' ? addDays(today(env), 1) : dayArg(env, args.day);
       return habitToTask(env.DB, stringArg(args.habit_id, 'habit_id'), day);
     },
+  },
+  {
+    name: 'get_note',
+    title: 'Get the focus note',
+    description:
+      'The short note Sejio keeps in sight at the top of Hoy: a phrase or a concrete plan for the next days. until is the last day it ' +
+      'shows (YYYY-MM-DD) or null; active says whether it shows today. null when there is no note.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {} },
+    run: async (env) => ({ note: await getFocusNote(env.DB, today(env)) }),
+  },
+  {
+    name: 'set_note',
+    title: 'Set the focus note',
+    description:
+      `Sets the note shown discreetly at the top of Hoy (at most ${MAX_NOTE} characters), replacing the previous one. ` +
+      'until is the last day it shows (YYYY-MM-DD, Europe/Madrid); leave it out to keep it until it is changed. An empty text clears the note.',
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: ['string', 'null'], maxLength: MAX_NOTE },
+        until: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      },
+      required: ['text'],
+    },
+    run: async (env, args) => ({ note: await setFocusNote(env.DB, args.text, args.until, today(env)) }),
   },
   {
     name: 'log_counter',

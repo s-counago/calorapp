@@ -457,12 +457,13 @@ async function metricTotals(db: D1Database, from: string, to: string) {
 // Summaries -----------------------------------------------------------------------
 
 export async function daySummary(db: D1Database, day: string) {
-  const [totals, goal, plan, habits, health] = await Promise.all([
+  const [totals, goal, plan, habits, health, note] = await Promise.all([
     metricTotals(db, day, day),
     goals(db),
     listTasks(db, { plan_date: day }),
     listHabits(db, day),
     healthDays(db, day, day),
+    getFocusNote(db, day),
   ]);
   const total = (kind: MetricKind) => totals.find((row) => row.kind === kind)?.total ?? 0;
   return {
@@ -475,6 +476,7 @@ export async function daySummary(db: D1Database, day: string) {
     plan: Object.fromEntries([...SLOTS, null].map((slot) => [slot ?? 'unslotted', plan.filter((task) => (task.plan_slot ?? null) === slot)])),
     habits: habits.map((habit) => ({ id: habit.id, name: habit.name, done: habit.done_today })),
     health: health[0] ?? null,
+    note: note?.active ? { text: note.text, until: note.until } : null,
   };
 }
 
@@ -609,6 +611,48 @@ export function healthAverages(days: HealthDay[]) {
   };
 }
 
+// Focus note ----------------------------------------------------------------------
+
+/**
+ * One short note that Sejio wants in sight for the next few days ("esta semana, solo lo de
+ * Prioridad"). Stored as the synced setting `focus_note` holding JSON { text, until }, so older
+ * phones simply ignore it. Past `until` (inclusive) it stops showing but is kept.
+ */
+export const FOCUS_NOTE_SETTING = 'focus_note';
+export const MAX_NOTE = 280;
+
+export interface FocusNote {
+  text: string;
+  /** Last day it shows (YYYY-MM-DD), or null to keep it until it is changed. */
+  until: string | null;
+  updated_at: number;
+}
+
+export async function getFocusNote(db: D1Database, today: string): Promise<(FocusNote & { active: boolean }) | null> {
+  const row = await db.prepare(`SELECT value, updated_at FROM settings WHERE id = ? AND deleted = 0`).bind(FOCUS_NOTE_SETTING).first<{ value: string; updated_at: number }>();
+  if (!row) return null;
+  let parsed: { text?: unknown; until?: unknown };
+  try { parsed = JSON.parse(row.value); } catch { return null; }
+  if (typeof parsed.text !== 'string' || !parsed.text) return null;
+  const until = typeof parsed.until === 'string' ? parsed.until : null;
+  return { text: parsed.text, until, updated_at: Number(row.updated_at), active: until === null || until >= today };
+}
+
+/** Sets the note, or clears it with an empty or null text. */
+export async function setFocusNote(db: D1Database, text: unknown, until: unknown, today: string) {
+  if (text === null || text === undefined || (typeof text === 'string' && !text.trim())) {
+    await save(db, 'settings', FOCUS_NOTE_SETTING, { value: '{}' }, true);
+    return null;
+  }
+  if (typeof text !== 'string') throw new ValidationError('text must be text');
+  if (text.trim().length > MAX_NOTE) throw new ValidationError(`text must be at most ${MAX_NOTE} characters`);
+  if (until !== undefined && until !== null && (typeof until !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(until))) {
+    throw new ValidationError('until must be YYYY-MM-DD or null');
+  }
+  await save(db, 'settings', FOCUS_NOTE_SETTING, { value: JSON.stringify({ text: text.trim(), until: until ?? null }) });
+  return getFocusNote(db, today);
+}
+
 // Features ------------------------------------------------------------------------
 
 /**
@@ -628,6 +672,18 @@ export const FEATURES = [
     key: 'task_kanban',
     title: 'Tablero Kanban en Tareas',
     description: 'Un segmento Kanban en Tareas con stack infinito, prioridad, baúl y fracasos, y el contador de tareas hechas.',
+    default: false,
+  },
+  {
+    key: 'habit_tasks',
+    title: 'Hábito → tarea',
+    description: 'Un botón en cada hábito para ponerlo como tarea de hoy o de mañana, con un evento de día completo en Google Calendar.',
+    default: false,
+  },
+  {
+    key: 'focus_note',
+    title: 'Nota en Hoy',
+    description: 'Una frase o un plan para los próximos días, en una línea discreta bajo el saludo de Hoy.',
     default: false,
   },
   {
