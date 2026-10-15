@@ -297,6 +297,8 @@ app.get('/api/tasks', async (c) => {
     await listTasks(c.env.DB, {
       status: query.status,
       plan_date: query.plan_date,
+      plan_from: query.plan_from,
+      plan_to: query.plan_to,
       project: query.project,
       due_before: query.due_before,
       following: query.following === undefined ? undefined : query.following === 'true',

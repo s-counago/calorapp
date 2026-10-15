@@ -67,3 +67,23 @@ describe('goals and counter entries', () => {
     await json('/api/goals', token, { method: 'PUT', body: JSON.stringify({ calorie_goal: 2450 }) });
   });
 });
+
+describe('plan range', () => {
+  it('lists tasks planned between two days', async () => {
+    const token = await deviceToken();
+    for (const [title, plan_date] of [['a', '2027-01-04'], ['b', '2027-01-06'], ['c', '2027-01-12']]) {
+      await json('/api/tasks', token, { method: 'POST', body: JSON.stringify({ title, plan_date }) });
+    }
+    const week = (await (await json('/api/tasks?plan_from=2027-01-04&plan_to=2027-01-10', token)).json()) as any[];
+    expect(week.map((task) => task.title)).toEqual(['a', 'b']);
+  });
+});
+
+describe('web', () => {
+  it('sends visitors without a session to Google sign-in', async () => {
+    const { call } = await import('./helpers');
+    const response = await call('/js/app.js');
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toContain('/auth/login?next=');
+  });
+});

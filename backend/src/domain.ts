@@ -73,6 +73,10 @@ function taskFromRow(row: Row): Task {
 export interface TaskFilter {
   status?: string;
   plan_date?: string;
+  /** Planned on or after this day. */
+  plan_from?: string;
+  /** Planned on or before this day. */
+  plan_to?: string;
   project?: string;
   due_before?: string;
   following?: boolean;
@@ -87,6 +91,8 @@ export async function listTasks(db: D1Database, filter: TaskFilter = {}): Promis
   const params: (string | number)[] = [];
   if (filter.status) { where.push('status = ?'); params.push(filter.status); }
   if (filter.plan_date) { where.push('plan_date = ?'); params.push(filter.plan_date); }
+  if (filter.plan_from) { where.push('plan_date >= ?'); params.push(filter.plan_from); }
+  if (filter.plan_to) { where.push('plan_date <= ?'); params.push(filter.plan_to); }
   if (filter.project) { where.push('project = ?'); params.push(filter.project); }
   if (filter.following !== undefined) { where.push('following = ?'); params.push(filter.following ? 1 : 0); }
   if (filter.board === 'none') where.push('board IS NULL');

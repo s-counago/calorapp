@@ -3,7 +3,7 @@
 Un único Cloudflare Worker con D1 que sirve tres cosas:
 
 - **API de sincronización** para la app Android, que sigue funcionando sin conexión.
-- **Web** para usar Pausa desde el ordenador (`public/`, de momento solo un esqueleto).
+- **Web** para usar Pausa desde el ordenador (`public/`, ver abajo).
 - **Servidor MCP** en `/mcp` para que Claude u otros agentes lean y editen los datos.
 
 Solo entra una cuenta de Google, la de `ALLOWED_EMAIL`. La banca no pasa por aquí: se queda cifrada en el móvil.
@@ -43,7 +43,7 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | Ruta | Uso |
 | --- | --- |
 | `GET/POST /api/sync` | Sincronización (ver arriba). |
-| `GET /api/tasks` | Filtros: `status`, `plan_date`, `project`, `due_before`, `following` (`true`/`false`), `board` (columna o `none`), `search`, `limit`. |
+| `GET /api/tasks` | Filtros: `status`, `plan_date`, `plan_from` y `plan_to` (rango del plan), `project`, `due_before`, `following` (`true`/`false`), `board` (columna o `none`), `search`, `limit`. |
 | `POST /api/tasks`, `PATCH/DELETE /api/tasks/<id>` | Crear, editar y borrar. |
 | `POST /api/tasks/import` | `{ "items": [{ "title", "notes", "board", "status", "source", "source_id", "created_at" }] }`, hasta 200. Se salta lo ya importado con el mismo `source` y `source_id`. |
 | `GET /api/board`, `PUT /api/board/done` | Tareas abiertas por columna y `done_total` (`tasks_done_base` + tareas del tablero hechas). `PUT` con `{ "total" }` corrige el total. |
@@ -72,6 +72,20 @@ Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `
 Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 
 Para conectarlo en Claude: Ajustes → Conectores → Añadir conector personalizado → `https://<tu-worker>/mcp`.
+
+## Web
+
+`public/` es una app de una sola página en JavaScript sin dependencias ni paso de compilación (`index.html`, `styles.css`, `js/app.js` y una vista por archivo en `js/views/`). Solo entra con la sesión de Google y usa la misma API REST que el móvil, así que lo que cambies allí llega al teléfono en su siguiente sincronización.
+
+- **Hoy:** contadores con los botones rápidos del móvil, corregir el total, poner a cero y cambiar el objetivo; plan del día por franjas (arrastrar entre franjas, «Añadir de tu lista»); hábitos del día; salud; lo de mañana; entradas del día. Se puede abrir cualquier día para corregirlo.
+- **Semana:** los siete días con sus franjas, lo que quedó atrás, tu lista y Prioridad a un lado; se planifica arrastrando.
+- **Lista, Tablero y Seguimientos:** como en el móvil. El Tablero sale solo con `task_kanban`.
+- **Hábitos:** puntos, racha y gráfica de 10 a 104 semanas, corregir cualquier semana pasada, crear, editar, archivar y borrar.
+- **Resumen** (`review_zoom`) y **Salud** (`health_connect`).
+- **Ajustes:** funciones, objetivos, dispositivos con su estado de sincronización y logs de las apps.
+- La caja **Apuntar** (atajo `/`) crea una tarea; `+350` suma calorías, `p30` proteína y `c1` un cigarro.
+
+Lo que vive solo en el móvil (Viajes, Dinero, franjas de Google Calendar y rituales) no aparece. Cada petición manda `X-Request-Id` (`web-…`); los fallos se muestran con ese id y se suben a `POST /api/logs` con la etiqueta `web`, así que salen en `get_client_logs`.
 
 ## Observabilidad
 

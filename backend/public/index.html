@@ -1,9 +1,27 @@
 <!doctype html>
 <html lang="es">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Pausa</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23214E3B'/%3E%3Crect x='10' y='9' width='4' height='14' rx='2' fill='%23F8F5ED'/%3E%3Crect x='18' y='9' width='4' height='14' rx='2' fill='%23F8F5ED'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/styles.css">
+<script type="module" src="/js/app.js"></script>
+</head>
 <body>
-<p>Pausa: la web llegará en la siguiente fase. La API ya está en <code>/api</code>.</p>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="#/hoy"><span class="brand-mark" aria-hidden="true"></span>Pausa</a>
+    <nav id="nav" aria-label="Secciones"></nav>
+    <p class="sidebar-foot">Pulsa <kbd>/</kbd> para apuntar</p>
+  </aside>
+  <div class="content">
+    <header class="topbar"><div id="capture-slot"></div></header>
+    <main id="view"><p class="loading">Cargando…</p></main>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<noscript>Pausa necesita JavaScript.</noscript>
 </body>
 </html>

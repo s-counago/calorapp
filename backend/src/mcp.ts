@@ -99,13 +99,15 @@ const TOOLS: Tool[] = [
   {
     name: 'list_tasks',
     title: 'List tasks',
-    description: 'Lists tasks, open ones first. Filter by status, planned day, project, due date, follow-up or text.',
+    description: 'Lists tasks, open ones first. Filter by status, planned day or range of days, project, due date, follow-up or text.',
     readOnly: true,
     inputSchema: {
       type: 'object',
       properties: {
         status: taskFields.status,
         plan_date: taskFields.plan_date,
+        plan_from: { ...day, description: 'Only tasks planned on or after this day.' },
+        plan_to: { ...day, description: 'Only tasks planned on or before this day. With status todo, finds plans left undone.' },
         project: { type: 'string' },
         due_before: { ...day, description: 'Only tasks due on or before this day.' },
         following: { type: 'boolean', description: 'true for follow-ups only, false to leave them out.' },
