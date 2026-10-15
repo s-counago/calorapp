@@ -53,6 +53,7 @@ El objetivo es que cualquier fallo se pueda depurar sin tener el móvil delante.
 - Las tareas con `board` (`stack`, `priority`, `vault`, `failed`) son el tablero Kanban (`KanbanView`, detrás de la función `task_kanban`) y no salen en la lista salvo que estén planificadas en un día. Las hechas del tablero suman al contador `tasks_done_base` (ajuste sincronizado) para dar el total de tareas hechas.
 - Los contadores son entradas del día natural; reiniciar es una entrada negativa. Los objetivos son `settings`.
 - Los puntos de los hábitos se calculan en el teléfono a partir de los checks sincronizados.
+- `HealthConnect` lee del Health Connect del sistema (Android 14+) el sueño, los pasos, el ejercicio y el pulso en reposo que guarda el Pixel Watch, y escribe una fila de `health_days` por día (id = el día) solo si cambia. Lee al abrir Hoy, como mucho cada 5 minutos, detrás de la función `health_connect`. El backend tiene que conocer `health_days` (migración 0006) antes de encender la función: si no, el push devuelve 400 y la sincronización se atasca.
 - Se quedan solo en el teléfono: banca, `TaskScheduleStore` y Google Calendar, rituales diarios, notificación y gráficas.
 - `PausaSync` programa `SyncWorker` con WorkManager (tras cada cambio, al abrir la app y cada 30 min, siempre con red). `SyncEngine` hace push por lotes, pull paginado y gana el último `updated_at`.
 - `LegacyImport` pasó una sola vez los datos de SharedPreferences a `PausaDb` y dejó las preferencias como copia.

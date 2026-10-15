@@ -32,7 +32,10 @@ final class Features {
     static final Feature TASK_KANBAN = new Feature("task_kanban", "Tablero Kanban en Tareas",
             "Un segmento Kanban en Tareas con stack infinito, prioridad, baúl y fracasos, y el contador de tareas hechas.", false);
 
-    static final Feature[] ALL = {REVIEW_ZOOM, TASK_KANBAN};
+    static final Feature HEALTH_CONNECT = new Feature("health_connect", "Salud del reloj",
+            "Sueño, pasos, ejercicio y pulso en reposo del Pixel Watch, leídos de Health Connect y mostrados en Hoy.", false);
+
+    static final Feature[] ALL = {REVIEW_ZOOM, TASK_KANBAN, HEALTH_CONNECT};
 
     private Features() {}
 
