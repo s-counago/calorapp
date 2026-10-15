@@ -29,6 +29,10 @@ Si una petición parece solo de Android pero toca datos, aplica igualmente esta 
 - Un campo nuevo tiene que ser opcional o tener un valor por defecto: hay teléfonos con versiones antiguas que siguen enviando registros.
 - Toda escritura queda en `change_log` con su autor (`device:<id>`, `web`, `mcp:<cliente>`).
 
+## Funciones activables
+
+Las funciones nuevas que cambian cómo se ve o se comporta la app se pueden encender y apagar desde Ajustes → Funciones (y por MCP con `list_features` / `set_feature`). Cada una es el ajuste sincronizado `feature:<clave>` con valor `on` u `off`. Para añadir una: entrada en `FEATURES` de `backend/src/domain.ts` y en `Features.ALL` de Android con la misma clave, y un valor por defecto que deje la app como estaba. Consulta `Features.isOn(context, Features.X)` donde la función aparezca.
+
 ## Lo que no sale del teléfono
 
 La banca (ABANCA, Trade Republic, presupuesto con movimientos y credenciales) se queda cifrada en el móvil. No la subas al backend ni la expongas por MCP sin que Sejio lo pida expresamente.
@@ -46,7 +50,7 @@ El objetivo es que cualquier fallo se pueda depurar sin tener el móvil delante.
 - Las vistas no cambian: `TaskStore`, `DayPlanStore`, `HabitStore` y `CalorieStore` leen y escriben `PausaDb`. Toda escritura pasa por `PausaDb.put`, que pone `updated_at`, encola el registro y pide una sincronización.
 - Tareas y hábitos conservan un `local_id` numérico (el id antiguo) para las vistas, las franjas de `TaskScheduleStore` y Google Calendar; el `id` del backend es un UUID.
 - El plan del día vive en la tarea (`plan_date`, `plan_slot`, `position`): una tarea está planificada como mucho en un día. El orden de la lista es el de creación.
-- Las tareas con `board` (`stack`, `priority`, `vault`, `failed`) son el tablero Kanban (`KanbanView`) y no salen en la lista salvo que estén planificadas en un día. Las hechas del tablero suman al contador `tasks_done_base` (ajuste sincronizado) para dar el total de tareas hechas.
+- Las tareas con `board` (`stack`, `priority`, `vault`, `failed`) son el tablero Kanban (`KanbanView`, detrás de la función `task_kanban`) y no salen en la lista salvo que estén planificadas en un día. Las hechas del tablero suman al contador `tasks_done_base` (ajuste sincronizado) para dar el total de tareas hechas.
 - Los contadores son entradas del día natural; reiniciar es una entrada negativa. Los objetivos son `settings`.
 - Los puntos de los hábitos se calculan en el teléfono a partir de los checks sincronizados.
 - Se quedan solo en el teléfono: banca, `TaskScheduleStore` y Google Calendar, rituales diarios, notificación y gráficas.

@@ -50,7 +50,9 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | `POST /api/counters` | `{ "kind": "calories" \| "protein" \| "cigarettes", "amount", "day" }`. |
 | `PUT /api/counters` | `{ "kind", "total", "day" }`: fija el total de un día (añade la diferencia como corrección). Para días olvidados. |
 | `GET /api/day?day=` | Contadores frente a objetivos, plan por franjas y hábitos del día. |
-| `GET /api/review?day=` | Revisión de la semana (lunes a domingo) que contiene ese día. |
+| `GET /api/review?day=&period=` | Revisión de la semana (lunes a domingo, `period=week`, por defecto) o del mes (`period=month`) que contiene ese día. |
+| `GET /api/features` | Funciones activables de las apps y si están encendidas. |
+| `PUT /api/features/<clave>` | `{ "enabled": true \| false }`: enciende o apaga una función. Se guarda como el ajuste `feature:<clave>`. |
 | `GET /api/devices`, `DELETE /api/devices/<id>` | Dispositivos con sesión. |
 | `POST /api/logs`, `GET /api/logs` | Logs que envían las apps (`{ app_version, entries: [{ at, level, tag, message, data }] }`). Filtros: `level` (mínimo), `tag`, `device_id`, `search`, `since`, `limit`. Se guardan 30 días. |
 | `GET /api/status` | Estado de la sincronización: `seq` del servidor, cada dispositivo con su último pull y push y cuánto va por detrás, recuento de registros y errores del cliente en 24 h. |
@@ -60,7 +62,7 @@ Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
 
 ## MCP
 
-Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `board_summary`, `set_done_total`, `import_tasks`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `set_counter`, `day_summary` y `weekly_review`.
+Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `board_summary`, `set_done_total`, `import_tasks`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `set_counter`, `day_summary`, `weekly_review` (semana o mes), `list_features` y `set_feature`.
 
 Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 

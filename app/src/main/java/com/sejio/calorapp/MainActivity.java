@@ -35,6 +35,7 @@ public class MainActivity extends Activity implements TodayView.Host {
     private View[] sections;
     private PausaNavigation navigation;
     private PausaUi.Segmented taskTabs;
+    private boolean kanbanTab;
     private LinearLayout taskHeader;
     private LinearLayout navRow;
     private ImageButton fab;
@@ -111,6 +112,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (weeklyPlannerView != null) weeklyPlannerView.refresh();
         if (currentSection == 7 && budgetView != null) budgetView.refresh();
         if (kanbanView != null) kanbanView.refresh();
+        // The flag can arrive by sync (MCP or web), not only from Ajustes → Funciones.
+        if (taskTabs != null && kanbanTab != Features.isOn(this, Features.TASK_KANBAN)) featuresChanged();
     }
 
     private View createAppView() {
@@ -126,9 +129,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         taskHeader = new LinearLayout(this);
         taskHeader.setOrientation(LinearLayout.VERTICAL);
         taskHeader.setPadding(dp(20), dp(10), dp(20), dp(6));
-        taskTabs = new PausaUi.Segmented(this, new String[]{"Lista", "Hoy", "Mañana", "Semana", "Kanban"},
-                index -> showSection(TASK_SECTIONS[index]));
-        taskHeader.addView(taskTabs, new LinearLayout.LayoutParams(-1, -2));
+        buildTaskTabs();
         column.addView(taskHeader, new LinearLayout.LayoutParams(-1, -2));
         content = new FrameLayout(this);
         column.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -228,10 +229,28 @@ public class MainActivity extends Activity implements TodayView.Host {
         }
     }
 
+    /** The Kanban segment only exists while its feature is on (Ajustes → Funciones). */
+    private void buildTaskTabs() {
+        boolean kanban = kanbanTab = Features.isOn(this, Features.TASK_KANBAN);
+        String[] labels = kanban ? new String[]{"Lista", "Hoy", "Mañana", "Semana", "Kanban"}
+                : new String[]{"Lista", "Hoy", "Mañana", "Semana"};
+        if (taskTabs != null) taskHeader.removeView(taskTabs);
+        taskTabs = new PausaUi.Segmented(this, labels, index -> showSection(TASK_SECTIONS[index]));
+        taskHeader.addView(taskTabs, new LinearLayout.LayoutParams(-1, -2));
+        if (isTaskSection(currentSection) && currentSection != 8) taskTabs.select(indexOf(currentSection), false);
+    }
+
+    private void featuresChanged() {
+        counterView.refresh();
+        buildTaskTabs();
+        if (currentSection == 8 && !Features.isOn(this, Features.TASK_KANBAN)) showSection(2);
+    }
+
     private static boolean isTaskSection(int section) { return section == 2 || (section >= 4 && section <= 6) || section == 8; }
 
     private void showSection(int section) {
         section = Math.max(0, Math.min(sections.length - 1, section));
+        if (section == 8 && !Features.isOn(this, Features.TASK_KANBAN)) section = 2;
         if (section == currentSection) return;
         int old = currentSection; currentSection = section;
         View focus = getCurrentFocus();
@@ -409,6 +428,9 @@ public class MainActivity extends Activity implements TodayView.Host {
         }), 8);
         sheet.add(counterView.settingRow("Google Calendar", CalendarSync.status(this), () -> {
             sheet.dismiss(); startActivity(new android.content.Intent(this, CalendarConnectionActivity.class));
+        }), 8);
+        sheet.add(counterView.settingRow("Funciones", Features.summary(this), () -> {
+            sheet.dismiss(); Features.sheet(this, this::featuresChanged);
         }), 8);
         sheet.add(counterView.settingRow("Límite de calorías", PausaUi.number(CalorieStore.getCalorieLimit(this)) + " kcal",
                 () -> { sheet.dismiss(); counterView.editCalorieLimit(); }), 8);

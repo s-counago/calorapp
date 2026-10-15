@@ -71,7 +71,7 @@ formalizar un bono. Comprueba la plaza en Renfe antes de desplazarte o comprar.
 - `Hoy` es el panel diario: saludo según la hora, calorías en un arco de amanecer con cantidad libre,
   proteína y cigarros compactos, el ritual de revisar Notion, el plan del día por franjas con marcado
   directo y un acceso al plan de mañana. Los ajustes viven en una hoja aparte.
-- `Tareas` reúne `Lista`, `Hoy`, `Mañana`, `Semana` y `Kanban` en un selector segmentado. `Kanban` es el
+- `Tareas` reúne `Lista`, `Hoy`, `Mañana`, `Semana` y `Kanban` en un selector segmentado. `Kanban` (función «Tablero Kanban en Tareas» en Ajustes → Funciones) es el
   tablero que sustituye a Notion: `Stack infinito`, `Prioridad`, `Baúl` y `Fracasos`, una columna cada vez.
   Marcar una tarjeta como hecha suma uno al contador total de tareas hechas; tocarla permite moverla de
   columna, editarla o planificarla en un día, y entonces también aparece en la lista y en el plan. Cada sección conserva

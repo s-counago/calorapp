@@ -27,8 +27,13 @@ import {
   setMetricTotal,
   setHabitCheck,
   updateTask,
-  weeklyReview,
   type ImportItem,
+  FEATURES,
+  REVIEW_PERIODS,
+  listFeatures,
+  review,
+  setFeature,
+  type ReviewPeriod,
   type MetricKind,
 } from './domain';
 
@@ -282,11 +287,36 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'weekly_review',
-    title: 'Weekly review',
-    description: 'Review of the Monday-to-Sunday week containing the given day: tasks completed and pending, habits against their goals, counter averages.',
+    title: 'Weekly or monthly review',
+    description:
+      'Review of the Monday-to-Sunday week (default) or the calendar month containing the given day: tasks completed and pending, ' +
+      'habits against their weekly goal scaled to the period (target), counter averages and per-day totals. Days close at 03:00.',
     readOnly: true,
-    inputSchema: { type: 'object', properties: { day } },
-    run: (env, args) => weeklyReview(env.DB, dayArg(env, args.day), env.TIME_ZONE),
+    inputSchema: {
+      type: 'object',
+      properties: { day, period: { type: 'string', enum: [...REVIEW_PERIODS], description: 'week (default) or month.' } },
+    },
+    run: (env, args) => review(env.DB, dayArg(env, args.day), env.TIME_ZONE, (args.period ?? 'week') as ReviewPeriod),
+  },
+  {
+    name: 'list_features',
+    title: 'List switchable features',
+    description: 'Parts of the Pausa apps that can be switched on or off (Ajustes → Funciones on the phone), with whether each is enabled now.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {} },
+    run: async (env) => ({ items: await listFeatures(env.DB) }),
+  },
+  {
+    name: 'set_feature',
+    title: 'Switch a feature on or off',
+    description: 'Turns one feature of the Pausa apps on or off. The phone applies it on its next sync. Use list_features to see the keys.',
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: { key: { type: 'string', enum: FEATURES.map((feature) => feature.key) }, enabled: { type: 'boolean' } },
+      required: ['key', 'enabled'],
+    },
+    run: (env, args) => setFeature(env.DB, stringArg(args.key, 'key'), args.enabled as boolean),
   },
   // Diagnostics: read-only tools for debugging the apps and the sync.
   {
