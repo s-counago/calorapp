@@ -437,6 +437,31 @@ public final class BudgetTest {
         assertEquals(640, closed.committed());
     }
 
+    @Test public void movementsFiledUnderTobaccoCountInItsCap() throws Exception {
+        typicalMonths();
+        trade("2026-10-03T19:00:00Z", "card_successful_transaction", "-5.00", "BAR O PINCHO");
+        List<Ledger.Txn> txns = Ledger.fromDatabase(rows, MADRID);
+        Budget.Settings settings = Budget.Settings.defaults();
+        Budget.Snapshot plain = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Entry bar = null;
+        for (Budget.Entry entry : plain.entries) if (entry.merchant.toUpperCase().contains("PINCHO")) bar = entry;
+        settings.txn.put(bar.txn.id, "cat:tabaco"); // A machine in a bar, filed as tobacco by hand.
+        settings = Budget.Settings.fromJson(new JSONObject(settings.toJson().toString()));
+        Budget.Snapshot snapshot = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Line tobacco = line(Budget.cycle(snapshot, snapshot.last()), "tabaco");
+        assertEquals(770 + 500, tobacco.paid);
+        assertEquals(Budget.PARTIAL, tobacco.status);
+        // Settings saved by 6.12.0 learn the category on upgrade.
+        JSONObject three = settings.toJson().put("version", 3);
+        three.getJSONArray("rules").getJSONObject(indexOf(settings, "tabaco")).put("category", "");
+        assertEquals("tabaco", Budget.Settings.fromJson(three).rule("tabaco").category);
+    }
+
+    private static int indexOf(Budget.Settings settings, String id) {
+        for (int i = 0; i < settings.rules.size(); i++) if (settings.rules.get(i).id.equals(id)) return i;
+        return -1;
+    }
+
     @Test public void versionTwoSettingsGainTheCapsOnce() throws Exception {
         Budget.Settings two = Budget.Settings.defaults();
         two.rules.remove(two.rule("tabaco"));

@@ -20,7 +20,7 @@ import java.util.Set;
  */
 final class Budget {
     static final int LATE = 0, SOON = 1, PARTIAL = 2, UPCOMING = 3, RESERVED = 4, PAID = 5, SKIPPED = 6, MISSED = 7;
-    static final int VERSION = 3;
+    static final int VERSION = 4;
 
     // ------------------------------------------------------------ settings
 
@@ -37,6 +37,8 @@ final class Budget {
          * ({day, cents}, for things bought inside a bigger receipt) move out of free spending into the cap.
          */
         boolean cap;
+        /** On a cap, free spending of this category (taught by the owner or recognised) also goes to it. */
+        String category;
         final List<long[]> logs = new ArrayList<>();
 
         Rule(String id, String name, String symbol, long expected, int day, String... keywords) {
@@ -47,6 +49,7 @@ final class Budget {
         Rule range(long min, long max) { this.min = min; this.max = max; return this; }
         Rule every(int months) { frequency = Math.max(1, months); return this; }
         Rule capped() { cap = true; learn = false; return this; }
+        Rule of(String category) { this.category = category; return this; }
 
         boolean matches(Entry entry) {
             if (!enabled) return false;
@@ -67,7 +70,7 @@ final class Budget {
             for (String keyword : keywords) words.put(keyword);
             return new JSONObject().put("id", id).put("name", name).put("symbol", symbol).put("keywords", words)
                     .put("expected", expected).put("day", day).put("frequency", frequency).put("min", min).put("max", max)
-                    .put("invest", invest).put("learn", learn).put("enabled", enabled).put("cap", cap).put("logs", logsJson());
+                    .put("invest", invest).put("learn", learn).put("enabled", enabled).put("cap", cap).put("category", category == null ? "" : category).put("logs", logsJson());
         }
 
         private JSONArray logsJson() throws Exception {
@@ -86,6 +89,8 @@ final class Budget {
             rule.invest = json.optBoolean("invest"); rule.learn = json.optBoolean("learn", true);
             rule.enabled = json.optBoolean("enabled", true);
             rule.cap = json.optBoolean("cap");
+            String category = json.optString("category", "");
+            rule.category = category.isEmpty() ? null : category;
             JSONArray logs = json.optJSONArray("logs");
             if (logs != null) for (int i = 0; i < logs.length(); i++)
                 rule.logs.add(new long[]{logs.getJSONArray(i).getLong(0), logs.getJSONArray(i).getLong(1)});
@@ -119,7 +124,7 @@ final class Budget {
     /** Charged through Google Play, hence the amount range: other Google charges stay free spending. */
     private static Rule spotify() { return new Rule("google", "Spotify", "music", 649, 24, "GOOGLE").range(550, 750); }
     /** June–September 2026 ran 66–91 € a month at tobacconists; 95 € leaves room for cash and bar machines. */
-    private static Rule tabaco() { return new Rule("tabaco", "Tabaco", "spark", 9_500, 1, "ESTANCO", "EXPENDEDURIA").capped(); }
+    private static Rule tabaco() { return new Rule("tabaco", "Tabaco", "spark", 9_500, 1, "ESTANCO", "EXPENDEDURIA").capped().of("tabaco"); }
     /** Protein milk (about 40 € a month, often inside a supermarket receipt) and powder (about 50 € every two months). */
     private static Rule proteina() { return new Rule("proteina", "Proteína", "dumbbell", 9_000, 1, "HSN").capped(); }
     private static Rule cig() { return new Rule("cig", "Cuota CIG", "people", 2_019, 5, "INTERSINDICAL", "CUOTA CIG").every(3); }
@@ -219,6 +224,7 @@ final class Budget {
                 settings.cushionMoves.add(new long[]{moves.getJSONArray(i).getLong(0), moves.getJSONArray(i).getLong(1)});
             if (json.optInt("version", 1) < 2) settings.upgradeToTwo();
             if (json.optInt("version", 1) < 3) settings.upgradeToThree();
+            if (json.optInt("version", 1) < 4) settings.upgradeToFour();
             return settings;
         }
 
@@ -235,6 +241,12 @@ final class Budget {
         private void upgradeToThree() {
             if (rule("tabaco") == null) rules.add(tabaco());
             if (rule("proteina") == null) rules.add(proteina());
+        }
+
+        /** Version 4: movements filed under Tabaco count in the tobacco cap too. */
+        private void upgradeToFour() {
+            Rule tabaco = rule("tabaco");
+            if (tabaco != null && tabaco.cap && tabaco.category == null) tabaco.category = "tabaco";
         }
 
         static Settings defaults() {
@@ -302,6 +314,8 @@ final class Budget {
                 entry.taught = "";
                 for (Rule rule : settings.rules) if (rule.matches(entry)) { entry.rule = rule; break; }
             }
+            if (entry.free() && entry.category != null)
+                for (Rule rule : settings.rules) if (rule.cap && rule.enabled && entry.category.equals(rule.category)) { entry.rule = rule; break; }
             entries.add(entry);
         }
         return entries;
