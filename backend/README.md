@@ -47,9 +47,12 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | `POST /api/tasks`, `PATCH/DELETE /api/tasks/<id>` | Crear, editar y borrar. |
 | `POST /api/tasks/import` | `{ "items": [{ "title", "notes", "board", "status", "source", "source_id", "created_at" }] }`, hasta 200. Se salta lo ya importado con el mismo `source` y `source_id`. |
 | `GET /api/board`, `PUT /api/board/done` | Tareas abiertas por columna y `done_total` (`tasks_done_base` + tareas del tablero hechas). `PUT` con `{ "total" }` corrige el total. |
-| `GET/POST /api/habits`, `POST /api/habits/<id>/check` | Hábitos de la semana y marcar un día (`{ "day", "done" }`). |
+| `GET/POST /api/habits`, `POST /api/habits/<id>/check` | Hábitos de la semana con sus puntos, racha y gráfica (`?day=&weeks=`, de 10 a 104 semanas) y marcar un día (`{ "day", "done" }`). |
+| `PATCH/DELETE /api/habits/<id>` | Cambiar nombre, objetivo semanal (1 a 7), `archived` o `position`, y borrar. |
+| `GET /api/counters?day=&kind=` | Entradas de un día, en orden. Las correcciones son negativas. |
 | `POST /api/counters` | `{ "kind": "calories" \| "protein" \| "cigarettes", "amount", "day" }`. |
 | `PUT /api/counters` | `{ "kind", "total", "day" }`: fija el total de un día (añade la diferencia como corrección). Para días olvidados. |
+| `GET/PUT /api/goals` | Objetivos diarios: `calorie_goal` (kcal), `protein_goal` (g) y `cigarette_goal`. `PUT` cambia solo los que envíes. |
 | `GET /api/day?day=` | Contadores frente a objetivos, plan por franjas y hábitos del día. |
 | `GET /api/review?day=&period=` | Revisión de la semana (lunes a domingo, `period=week`, por defecto) o del mes (`period=month`) que contiene ese día. |
 | `GET /api/health?from=&to=` | Sueño, pasos, ejercicio y pulso en reposo por día (`health_days`) y sus medias. Por defecto, los 7 días que acaban hoy; como mucho un año. `GET /api/day` y `GET /api/review` también los incluyen en `health`. |
@@ -64,7 +67,7 @@ Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
 
 ## MCP
 
-Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `board_summary`, `set_done_total`, `import_tasks`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `set_counter`, `day_summary`, `weekly_review` (semana o mes), `health_days` (sueño, pasos, ejercicio y pulso del reloj), `list_features` y `set_feature`.
+Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `board_summary`, `set_done_total`, `import_tasks`, `list_habits` (con puntos y racha), `create_habit`, `update_habit`, `delete_habit`, `check_habit`, `log_counter`, `set_counter`, `counter_entries`, `set_goals`, `day_summary`, `weekly_review` (semana o mes), `health_days` (sueño, pasos, ejercicio y pulso del reloj), `list_features` y `set_feature`.
 
 Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 

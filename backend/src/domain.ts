@@ -233,7 +233,7 @@ export async function importTasks(db: D1Database, items: ImportItem[]) {
 
 // Habits --------------------------------------------------------------------------
 
-export interface HabitWeek {
+export interface HabitWeek extends HabitScore {
   id: string;
   name: string;
   weekly_goal: number;
@@ -245,21 +245,104 @@ export interface HabitWeek {
   done_today: boolean;
 }
 
-export async function listHabits(db: D1Database, today: string): Promise<HabitWeek[]> {
+/** Points a habit has earned, worked out from its checks the same way the phone does. */
+export interface HabitScore {
+  /** Total points, never below zero. */
+  points: number;
+  /** Weeks in a row with the minimum met, counting this week only once it is met. */
+  streak: number;
+  /** Days done in the week of the day asked for. */
+  week_count: number;
+  minimum_met: boolean;
+  /** Points the next check would add this week: the base if the minimum is not met yet, else the bonus for an extra day. */
+  next_reward: number;
+  /** Points lost for missing the minimum the week before. */
+  last_week_penalty: number;
+  /** Points at the end of each of the last `weeks` weeks, oldest first, ending with the current week. */
+  sparkline: number[];
+}
+
+/** First week to meet the minimum is worth this much; each week in a row after that is worth 15 % more. */
+export const HABIT_FIRST_REWARD = 5;
+export const HABIT_CHART_WEEKS = { min: 10, max: 104 } as const;
+
+const ceilPercent = (value: number, percent: number) => Math.ceil((value * percent) / 100);
+/** An extra day beyond the minimum adds 20 % of the week's base, at least one point. */
+const habitBonus = (base: number) => Math.max(1, ceilPercent(base, 20));
+
+/**
+ * Scores a habit from the days it was done, oldest week first. A week that meets the minimum earns
+ * its base (5 the first time, then 15 % more for each week in a row) plus a bonus per extra day;
+ * a finished week that misses it loses 15 % of the points so far. Uses the current weekly goal for
+ * every week, so it can differ by a few points from the phone after a goal change.
+ */
+export function scoreHabit(days: Iterable<string>, weeklyGoal: number, createdDay: string, today: string, weeks: number = HABIT_CHART_WEEKS.min): HabitScore {
+  const perWeek = new Map<string, number>();
+  for (const day of new Set(days)) perWeek.set(weekStart(day), (perWeek.get(weekStart(day)) ?? 0) + 1);
+  const current = weekStart(today);
+  const first = [weekStart(createdDay), ...perWeek.keys()].sort()[0];
+  const chartWeeks = Math.max(HABIT_CHART_WEEKS.min, Math.min(HABIT_CHART_WEEKS.max, Math.trunc(weeks) || HABIT_CHART_WEEKS.min));
+  const chartStart = addDays(current, -(chartWeeks - 1) * 7);
+  const bases = new Map<string, number>();
+  const penalties = new Map<string, number>();
+  const totals = new Map<string, number>();
+  let score = 0;
+  for (let week = first < current ? first : current; week <= current; week = addDays(week, 7)) {
+    const count = perWeek.get(week) ?? 0;
+    if (count >= weeklyGoal) {
+      const previous = bases.get(addDays(week, -7));
+      const base = previous === undefined ? HABIT_FIRST_REWARD : ceilPercent(previous, 115);
+      bases.set(week, base);
+      score += base + (count - weeklyGoal) * habitBonus(base);
+    } else if (week < current) {
+      const penalty = ceilPercent(score, 15);
+      penalties.set(week, penalty);
+      score = Math.max(0, score - penalty);
+    }
+    totals.set(week, score);
+  }
+  let streak = 0;
+  for (let week = bases.has(current) ? current : addDays(current, -7); bases.has(week); week = addDays(week, -7)) streak++;
+  const base = bases.get(current);
+  const previousBase = bases.get(addDays(current, -7));
+  const sparkline: number[] = [];
+  let carried = 0;
+  for (const [week, total] of totals) if (week < chartStart) carried = total;
+  for (let index = 0; index < chartWeeks; index++) {
+    const week = addDays(chartStart, index * 7);
+    carried = totals.get(week) ?? carried;
+    sparkline.push(carried);
+  }
+  return {
+    points: score,
+    streak,
+    week_count: perWeek.get(current) ?? 0,
+    minimum_met: base !== undefined,
+    next_reward: base !== undefined ? habitBonus(base) : previousBase !== undefined ? ceilPercent(previousBase, 115) : HABIT_FIRST_REWARD,
+    last_week_penalty: penalties.get(addDays(current, -7)) ?? 0,
+    sparkline,
+  };
+}
+
+/** Active habits with the days done in the week of `today`, their points and a chart of the last `weeks` weeks. */
+export async function listHabits(db: D1Database, today: string, weeks?: number): Promise<HabitWeek[]> {
   const start = weekStart(today);
   const { results: habits } = await db.prepare(`SELECT * FROM habits WHERE deleted = 0 AND archived = 0 ORDER BY position, name`).all<Row>();
   const { results: checks } = await db
-    .prepare(`SELECT habit_id, day FROM habit_checks WHERE deleted = 0 AND day BETWEEN ? AND ?`)
-    .bind(start, addDays(start, 6))
+    .prepare(`SELECT habit_id, day FROM habit_checks WHERE deleted = 0 AND day <= ?`)
+    .bind(addDays(start, 6))
     .all<{ habit_id: string; day: string }>();
   return habits.map((row) => {
-    const days = checks.filter((check) => check.habit_id === row.id).map((check) => check.day).sort();
+    const all = checks.filter((check) => check.habit_id === row.id).map((check) => check.day);
+    const days = all.filter((day) => day >= start).sort();
+    const record = toRecord('habits', row) as Omit<HabitWeek, 'id' | 'week_start' | 'week_days_done' | 'done_today' | keyof HabitScore>;
     return {
       id: String(row.id),
-      ...(toRecord('habits', row) as Omit<HabitWeek, 'id' | 'week_start' | 'week_days_done' | 'done_today'>),
+      ...record,
       week_start: start,
       week_days_done: days,
       done_today: days.includes(today),
+      ...scoreHabit(all, record.weekly_goal, record.created_day, today, weeks),
     };
   });
 }
@@ -270,9 +353,31 @@ export async function createHabit(db: D1Database, input: { name: string; weekly_
   return id;
 }
 
+async function getHabitRow(db: D1Database, id: string): Promise<Row> {
+  const habit = await getRow(db, 'habits', id);
+  if (!habit || habit.deleted === 1) throw new NotFoundError(`No habit ${id}`);
+  return habit;
+}
+
+const HABIT_EDITABLE = ['name', 'weekly_goal', 'archived', 'position'] as const;
+
+/** Renames a habit, changes its weekly goal (1 to 7), archives it or moves it. */
+export async function updateHabit(db: D1Database, id: string, patch: Record<string, unknown>) {
+  const data: Record<string, unknown> = toRecord('habits', await getHabitRow(db, id));
+  for (const key of HABIT_EDITABLE) if (patch[key] !== undefined) data[key] = patch[key];
+  if (typeof data.name === 'string') data.name = data.name.trim();
+  if (!data.name) throw new ValidationError('name is required');
+  await save(db, 'habits', id, data);
+  return { id, ...toRecord('habits', await getHabitRow(db, id)) };
+}
+
+/** Deletes a habit on every device. Its checks stay in the history but no longer count. */
+export async function deleteHabit(db: D1Database, id: string) {
+  await save(db, 'habits', id, toRecord('habits', await getHabitRow(db, id)), true);
+}
+
 export async function setHabitCheck(db: D1Database, habitId: string, day: string, done: boolean) {
-  const habit = await getRow(db, 'habits', habitId);
-  if (!habit || habit.deleted === 1) throw new NotFoundError(`No habit ${habitId}`);
+  await getHabitRow(db, habitId);
   await save(db, 'habit_checks', `${habitId}:${day}`, { habit_id: habitId, day }, !done);
 }
 
@@ -297,6 +402,30 @@ export async function setMetricTotal(db: D1Database, kind: MetricKind, total: nu
   if (difference === 0) return { id: null, previous: current, total };
   const id = await logMetric(db, kind, difference, day);
   return { id, previous: current, total };
+}
+
+/** Every entry of one day, in the order they were logged. Corrections show up as negative amounts. */
+export async function counterEntries(db: D1Database, day: string, kind?: string) {
+  if (kind !== undefined && !METRIC_KINDS.includes(kind as MetricKind)) throw new ValidationError(`kind must be one of ${METRIC_KINDS.join(', ')}`);
+  const { results } = await db
+    .prepare(`SELECT id, day, kind, amount, at FROM metric_entries WHERE deleted = 0 AND day = ?${kind ? ' AND kind = ?' : ''} ORDER BY at`)
+    .bind(...(kind ? [day, kind] : [day]))
+    .all<{ id: string; day: string; kind: MetricKind; amount: number; at: number }>();
+  return results;
+}
+
+/** Changes any of the daily goals: calorie limit (kcal), protein goal (g) and cigarette limit. */
+export async function setGoals(db: D1Database, input: Partial<Record<keyof typeof GOAL_DEFAULTS, unknown>>) {
+  const changes = [];
+  for (const key of Object.keys(GOAL_DEFAULTS) as (keyof typeof GOAL_DEFAULTS)[]) {
+    const value = input[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 100000) throw new ValidationError(`${key} must be an integer between 0 and 100000`);
+    changes.push({ table: 'settings' as const, id: key, updated_at: Date.now(), deleted: false, data: { value: String(value) } });
+  }
+  if (!changes.length) throw new ValidationError(`Give at least one of ${Object.keys(GOAL_DEFAULTS).join(', ')}`);
+  await applyChanges(db, changes);
+  return goals(db);
 }
 
 export async function goals(db: D1Database): Promise<Record<keyof typeof GOAL_DEFAULTS, number>> {

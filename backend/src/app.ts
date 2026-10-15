@@ -39,6 +39,11 @@ import {
   getTask,
   importTasks,
   listHabits,
+  updateHabit,
+  deleteHabit,
+  counterEntries,
+  setGoals,
+  goals,
   listTasks,
   currentDay,
   logMetric,
@@ -318,12 +323,20 @@ app.delete('/api/tasks/:id', async (c) => {
   return c.body(null, 204);
 });
 
-app.get('/api/habits', async (c) => c.json(await listHabits(c.env.DB, dayQuery(c))));
+app.get('/api/habits', async (c) => {
+  const weeks = c.req.query('weeks');
+  return c.json(await listHabits(c.env.DB, dayQuery(c), weeks === undefined ? undefined : Number(weeks)));
+});
 app.post('/api/habits', async (c) => {
   const body = await c.req.json<{ name?: unknown; weekly_goal?: unknown }>();
   if (typeof body.name !== 'string' || !body.name) throw new ValidationError('name is required');
   const id = await createHabit(c.env.DB, { name: body.name, weekly_goal: body.weekly_goal as number | undefined }, today(c));
   return c.json({ id }, 201);
+});
+app.patch('/api/habits/:id', async (c) => c.json(await updateHabit(c.env.DB, c.req.param('id'), await c.req.json())));
+app.delete('/api/habits/:id', async (c) => {
+  await deleteHabit(c.env.DB, c.req.param('id'));
+  return c.body(null, 204);
 });
 app.post('/api/habits/:id/check', async (c) => {
   const body = await c.req.json<{ day?: string; done?: boolean }>().catch(() => ({}) as { day?: string; done?: boolean });
@@ -331,6 +344,8 @@ app.post('/api/habits/:id/check', async (c) => {
   await setHabitCheck(c.env.DB, c.req.param('id'), day, body.done !== false);
   return c.json({ ok: true });
 });
+
+app.get('/api/counters', async (c) => c.json({ day: dayQuery(c), entries: await counterEntries(c.env.DB, dayQuery(c), c.req.query('kind')) }));
 
 app.post('/api/counters', async (c) => {
   const body = await c.req.json<{ kind?: MetricKind; amount?: unknown; day?: string }>();
@@ -345,6 +360,9 @@ app.put('/api/counters', async (c) => {
   const day = body.day ?? today(c);
   return c.json(await setMetricTotal(c.env.DB, body.kind as MetricKind, body.total as number, day));
 });
+
+app.get('/api/goals', async (c) => c.json(await goals(c.env.DB)));
+app.put('/api/goals', async (c) => c.json(await setGoals(c.env.DB, await c.req.json())));
 
 app.get('/api/day', async (c) => c.json(await daySummary(c.env.DB, dayQuery(c))));
 app.get('/api/review', async (c) =>

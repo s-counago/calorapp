@@ -20,6 +20,11 @@ import {
   getTask,
   importTasks,
   listHabits,
+  updateHabit,
+  deleteHabit,
+  counterEntries,
+  setGoals,
+  GOAL_DEFAULTS,
   listTasks,
   currentDay,
   logMetric,
@@ -208,10 +213,15 @@ const TOOLS: Tool[] = [
   {
     name: 'list_habits',
     title: 'List habits',
-    description: 'Lists active habits with their weekly goal and the days done this week.',
+    description:
+      'Lists active habits with their weekly goal (days per week), the days done in the week of the given day and their points: ' +
+      'points (total), streak (weeks in a row meeting the goal), week_count, minimum_met, next_reward (points the next check adds), ' +
+      'last_week_penalty and sparkline (points at the end of each of the last `weeks` weeks, oldest first). ' +
+      'A week meeting the goal earns 5 points the first time and 15 % more each week in a row, plus 20 % of that per extra day; ' +
+      'a finished week that misses it loses 15 % of the points.',
     readOnly: true,
-    inputSchema: { type: 'object', properties: { day } },
-    run: (env, args) => listHabits(env.DB, dayArg(env, args.day)),
+    inputSchema: { type: 'object', properties: { day, weeks: { type: 'integer', minimum: 10, maximum: 104, description: 'Weeks in the sparkline. Default 10.' } } },
+    run: (env, args) => listHabits(env.DB, dayArg(env, args.day), args.weeks as number | undefined),
   },
   {
     name: 'create_habit',
@@ -226,6 +236,38 @@ const TOOLS: Tool[] = [
     run: async (env, args) => ({
       id: await createHabit(env.DB, { name: stringArg(args.name, 'name'), weekly_goal: args.weekly_goal as number | undefined }, today(env)),
     }),
+  },
+  {
+    name: 'update_habit',
+    title: 'Update a habit',
+    description: 'Renames a habit, changes its weekly goal (1 to 7 days), archives it (archived: true hides it everywhere) or changes its position in the list.',
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        weekly_goal: { type: 'integer', minimum: 1, maximum: 7 },
+        archived: { type: 'boolean' },
+        position: { type: 'number', description: 'Order in the list, lowest first.' },
+      },
+      required: ['id'],
+    },
+    run: (env, args) => {
+      const { id, ...patch } = args;
+      return updateHabit(env.DB, stringArg(id, 'id'), patch);
+    },
+  },
+  {
+    name: 'delete_habit',
+    title: 'Delete a habit',
+    description: 'Deletes a habit and its points on every device. Prefer update_habit with archived: true to keep the history.',
+    readOnly: false,
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    run: async (env, args) => {
+      await deleteHabit(env.DB, stringArg(args.id, 'id'));
+      return { deleted: args.id };
+    },
   },
   {
     name: 'check_habit',
@@ -277,6 +319,28 @@ const TOOLS: Tool[] = [
       const result = await setMetricTotal(env.DB, args.kind as MetricKind, args.total as number, target);
       return { day: target, previous: result.previous, ...(await daySummary(env.DB, target)).counters };
     },
+  },
+  {
+    name: 'counter_entries',
+    title: 'Counter entries of a day',
+    description: 'Every entry logged for calories (kcal), protein (g) and cigarettes on a day, with the time (at, epoch ms). Corrections and resets are negative amounts.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { day, kind: { type: 'string', enum: [...METRIC_KINDS] } } },
+    run: async (env, args) => {
+      const target = dayArg(env, args.day);
+      return { day: target, entries: await counterEntries(env.DB, target, args.kind as string | undefined) };
+    },
+  },
+  {
+    name: 'set_goals',
+    title: 'Set daily goals',
+    description: `Changes the daily goals: calorie_goal (kcal limit, default ${GOAL_DEFAULTS.calorie_goal}), protein_goal (grams to reach, default ${GOAL_DEFAULTS.protein_goal}) and cigarette_goal (daily maximum, default ${GOAL_DEFAULTS.cigarette_goal}). Pass only the ones to change. Returns all goals.`,
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: { calorie_goal: { type: 'integer', minimum: 0 }, protein_goal: { type: 'integer', minimum: 0 }, cigarette_goal: { type: 'integer', minimum: 0 } },
+    },
+    run: (env, args) => setGoals(env.DB, args),
   },
   {
     name: 'day_summary',
@@ -434,7 +498,7 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
           title: tool.title,
           description: tool.description,
           inputSchema: tool.inputSchema,
-          annotations: { readOnlyHint: tool.readOnly, destructiveHint: tool.name === 'delete_task', openWorldHint: false },
+          annotations: { readOnlyHint: tool.readOnly, destructiveHint: tool.name.startsWith('delete_'), openWorldHint: false },
         })),
       });
     case 'tools/call': {
