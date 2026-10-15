@@ -403,6 +403,9 @@ public class MainActivity extends Activity implements TodayView.Host {
         sheet.add(counterView.settingRow("Google Calendar", CalendarSync.status(this), () -> {
             sheet.dismiss(); startActivity(new android.content.Intent(this, CalendarConnectionActivity.class));
         }), 8);
+        sheet.add(counterView.settingRow("Funciones", Features.summary(this), () -> {
+            sheet.dismiss(); Features.sheet(this, counterView::refresh);
+        }), 8);
         sheet.add(counterView.settingRow("Límite de calorías", PausaUi.number(CalorieStore.getCalorieLimit(this)) + " kcal",
                 () -> { sheet.dismiss(); counterView.editCalorieLimit(); }), 8);
         sheet.add(counterView.settingRow("Objetivo de proteína", CalorieStore.getProteinGoal(this) + " g",

@@ -29,6 +29,10 @@ Si una petición parece solo de Android pero toca datos, aplica igualmente esta 
 - Un campo nuevo tiene que ser opcional o tener un valor por defecto: hay teléfonos con versiones antiguas que siguen enviando registros.
 - Toda escritura queda en `change_log` con su autor (`device:<id>`, `web`, `mcp:<cliente>`).
 
+## Funciones activables
+
+Las funciones nuevas que cambian cómo se ve o se comporta la app se pueden encender y apagar desde Ajustes → Funciones (y por MCP con `list_features` / `set_feature`). Cada una es el ajuste sincronizado `feature:<clave>` con valor `on` u `off`. Para añadir una: entrada en `FEATURES` de `backend/src/domain.ts` y en `Features.ALL` de Android con la misma clave, y un valor por defecto que deje la app como estaba. Consulta `Features.isOn(context, Features.X)` donde la función aparezca.
+
 ## Lo que no sale del teléfono
 
 La banca (ABANCA, Trade Republic, presupuesto con movimientos y credenciales) se queda cifrada en el móvil. No la subas al backend ni la expongas por MCP sin que Sejio lo pida expresamente.

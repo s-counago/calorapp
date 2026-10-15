@@ -20,6 +20,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -47,6 +48,11 @@ final class TodayView extends PausaUi.Scroll {
     private final TextView ritualText, habitRitualText;
     private final LinearLayout dayList;
     private final TextView tomorrowLine;
+    /** Día · Semana · Mes (feature review_zoom). Día shows the usual Hoy; the others swap it for the review. */
+    private final PausaUi.Segmented zoom;
+    private final ReviewView review;
+    private final List<View> dayViews = new ArrayList<>();
+    private int zoomLevel;
     private int shownCalories = -1, shownProtein = -1;
     private String shownDay;
     private boolean receiverRegistered;
@@ -85,6 +91,11 @@ final class TodayView extends PausaUi.Scroll {
         brand.addView(PausaUi.iconButton(activity, "tune", "Ajustes", PausaUi.INK, host::settings),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
         root.addView(brand, full());
+
+        zoom = new PausaUi.Segmented(activity, new String[]{"Día", "Semana", "Mes"}, level -> setZoom(level, true));
+        zoom.setVisibility(View.GONE);
+        root.addView(zoom, spaced(4, 0));
+        int dayFrom = root.getChildCount();
 
         // Greeting.
         LinearLayout hello = column();
@@ -279,7 +290,26 @@ final class TodayView extends PausaUi.Scroll {
         tomorrowLine.setCompoundDrawablePadding(dp(12));
         tomorrowLine.setOnClickListener(v -> host.open(4));
         root.addView(tomorrowLine, spaced(0, 8));
+        for (int i = dayFrom; i < root.getChildCount(); i++) dayViews.add(root.getChildAt(i));
+        review = new ReviewView(activity, host);
+        review.setVisibility(View.GONE);
+        root.addView(review, spaced(0, 8));
+        zoom.select(0, false);
         refresh();
+    }
+
+    private void setZoom(int level, boolean animate) {
+        boolean changed = level != zoomLevel;
+        zoomLevel = level;
+        zoom.select(level, animate);
+        for (View view : dayViews) view.setVisibility(level == 0 ? View.VISIBLE : View.GONE);
+        review.setVisibility(level == 0 ? View.GONE : View.VISIBLE);
+        if (level > 0) review.show(level == 1 ? Review.WEEK : Review.MONTH);
+        if (changed) {
+            scrollTo(0, 0);
+            if (animate && level > 0) PausaUi.stagger(review, 6);
+            else if (animate) for (int i = 0; i < Math.min(4, dayViews.size()); i++) PausaUi.rise(dayViews.get(i), 40L * i);
+        }
     }
 
     // ------------------------------------------------------------ lifecycle
@@ -306,6 +336,10 @@ final class TodayView extends PausaUi.Scroll {
 
     void refresh() {
         shownDay = DayPlanStore.day(0);
+        boolean zoomOn = Features.isOn(activity, Features.REVIEW_ZOOM);
+        zoom.setVisibility(zoomOn ? View.VISIBLE : View.GONE);
+        if (!zoomOn && zoomLevel != 0) setZoom(0, false);
+        else if (zoomLevel > 0) review.refresh();
         String date = new SimpleDateFormat("EEEE · d 'de' MMMM", PausaUi.SPANISH).format(new Date());
         eyebrow.setText(date.toUpperCase(PausaUi.SPANISH));
         greeting.setText(PausaUi.greeting() + ".");

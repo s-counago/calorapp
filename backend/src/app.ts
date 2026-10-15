@@ -43,7 +43,10 @@ import {
   setHabitCheck,
   setMetricTotal,
   updateTask,
-  weeklyReview,
+  review,
+  listFeatures,
+  setFeature,
+  type ReviewPeriod,
   type MetricKind,
 } from './domain';
 
@@ -329,7 +332,15 @@ app.put('/api/counters', async (c) => {
 });
 
 app.get('/api/day', async (c) => c.json(await daySummary(c.env.DB, dayQuery(c))));
-app.get('/api/review', async (c) => c.json(await weeklyReview(c.env.DB, dayQuery(c), c.env.TIME_ZONE)));
+app.get('/api/review', async (c) =>
+  c.json(await review(c.env.DB, dayQuery(c), c.env.TIME_ZONE, (c.req.query('period') ?? 'week') as ReviewPeriod)),
+);
+
+app.get('/api/features', async (c) => c.json({ items: await listFeatures(c.env.DB) }));
+app.put('/api/features/:key', async (c) => {
+  const body = await c.req.json<{ enabled?: unknown }>();
+  return c.json(await setFeature(c.env.DB, c.req.param('key'), body.enabled as boolean));
+});
 
 app.get('/api/devices', async (c) => {
   const { results } = await c.env.DB.prepare(`SELECT id, name, created_at, last_seen_at, revoked_at FROM devices ORDER BY created_at DESC`).all();

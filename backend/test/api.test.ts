@@ -53,6 +53,38 @@ describe('api', () => {
     expect(review.habits).toEqual([expect.objectContaining({ name: 'Correr', days_done: 2, met: true })]);
   });
 
+  it('builds the monthly review with habit targets scaled to the month', async () => {
+    const token = await deviceToken();
+    await json('/api/counters', token, { method: 'POST', body: JSON.stringify({ kind: 'calories', amount: 2000, day: '2026-10-01' }) });
+    await json('/api/counters', token, { method: 'POST', body: JSON.stringify({ kind: 'calories', amount: 3000, day: '2026-10-31' }) });
+    await json('/api/counters', token, { method: 'POST', body: JSON.stringify({ kind: 'calories', amount: 9999, day: '2026-11-01' }) });
+    const habit = (await (await json('/api/habits', token, { method: 'POST', body: JSON.stringify({ name: 'Gym', weekly_goal: 4 }) })).json()) as any;
+    await json(`/api/habits/${habit.id}/check`, token, { method: 'POST', body: JSON.stringify({ day: '2026-10-05' }) });
+
+    const month = (await (await json('/api/review?day=2026-10-15&period=month', token)).json()) as any;
+    expect(month).toMatchObject({ period: 'month', start: '2026-10-01', end: '2026-10-31' });
+    expect(month.week_start).toBeUndefined();
+    expect(month.counters.per_day).toHaveLength(31);
+    expect(month.counters.average.calories).toBe(2500);
+    expect(month.habits).toEqual([expect.objectContaining({ name: 'Gym', target: 18, days_done: 1, met: false })]);
+    expect((await json('/api/review?period=year', token)).status).toBe(400);
+  });
+
+  it('switches features on and off as synced settings', async () => {
+    const token = await deviceToken();
+    const list = async () => ((await (await json('/api/features', token)).json()) as any).items;
+    expect(await list()).toEqual([expect.objectContaining({ key: 'review_zoom', enabled: false, default: false })]);
+
+    const on = (await (await json('/api/features/review_zoom', token, { method: 'PUT', body: JSON.stringify({ enabled: true }) })).json()) as any;
+    expect(on).toMatchObject({ key: 'review_zoom', enabled: true });
+    expect(await list()).toEqual([expect.objectContaining({ key: 'review_zoom', enabled: true })]);
+    const { changes } = (await (await json('/api/sync?since=0', token)).json()) as any;
+    expect(changes).toEqual([expect.objectContaining({ table: 'settings', id: 'feature:review_zoom', data: { value: 'on' } })]);
+
+    expect((await json('/api/features/nope', token, { method: 'PUT', body: JSON.stringify({ enabled: true }) })).status).toBe(400);
+    expect((await json('/api/features/review_zoom', token, { method: 'PUT', body: JSON.stringify({ enabled: 'yes' }) })).status).toBe(400);
+  });
+
   it('sets the total of a forgotten day with one correction entry', async () => {
     const token = await deviceToken();
     await json('/api/counters', token, { method: 'POST', body: JSON.stringify({ kind: 'calories', amount: 500, day: '2026-10-10' }) });
