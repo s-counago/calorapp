@@ -82,7 +82,7 @@ Para conectarlo en Claude: Ajustes → Conectores → Añadir conector personali
 - **Hoy:** la nota de estos días (`focus_note`, clic para editarla); contadores con los botones rápidos del móvil, corregir el total, poner a cero y cambiar el objetivo; plan del día por franjas (arrastrar entre franjas, «Añadir de tu lista»); hábitos del día; salud; lo de mañana; entradas del día. Se puede abrir cualquier día para corregirlo.
 - **Semana:** los siete días con sus franjas, lo que quedó atrás, tu lista y Prioridad a un lado; se planifica arrastrando.
 - **Bandeja, Carriles y Esperando:** como en el móvil. Carriles sale solo con `task_kanban`.
-- **Cajón** (`captures`): apuntar enlaces e ideas, aceptar la sugerencia de un agente, convertir en tarea, guardar en la biblioteca con etiquetas, archivar o borrar.
+- **Cajón** (`captures`): apuntar enlaces e ideas, aceptar la sugerencia de un agente, convertir en tarea, guardar en la biblioteca con etiquetas, archivar o borrar. Se ordena con el teclado: J/K, Enter acepta la sugerencia, T, G, A y 1–6 manda a un carril.
 - **Hábitos:** puntos, racha y gráfica de 10 a 104 semanas, corregir cualquier semana pasada, crear, editar, archivar y borrar.
 - **Resumen** (`review_zoom`) y **Salud** (`health_connect`).
 - **Ajustes:** funciones, objetivos, dispositivos con su estado de sincronización y logs de las apps.

@@ -295,3 +295,5 @@ table.data td { border-bottom: 1px solid var(--line); padding: .35rem .4rem; ver
 .suggestion { background: var(--sage-soft); border-radius: 10px; padding: .5rem .8rem; margin: .5rem 0; }
 .suggestion p { margin: .2rem 0; }
 .drawer-item .actions { flex-wrap: wrap; }
+.drawer-item.selected { outline: 2px solid var(--sage); outline-offset: 2px; }
+.keys { margin: .6rem 0; }

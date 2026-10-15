@@ -16,9 +16,43 @@ const KIND_LABELS = { note: 'Nota', idea: 'Idea', link: 'Enlace', task: 'Tarea',
 
 let tab = 'new';
 let search = '';
+/** Keyboard triage: the card under the cursor and what each key does to it. */
+let current = [];
+let selected = 0;
+const LANE_KEYS = Object.keys(LANE_LABELS); // 1 Bandeja … 6 Fracasos
+
+document.addEventListener('keydown', (event) => {
+  if (!location.hash.startsWith('#/cajon') || !current.length || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target.closest?.('input, textarea, select, dialog') || document.querySelector('dialog[open]')) return;
+  const capture = current[selected];
+  const key = event.key.toLowerCase();
+  const actions = {
+    j: () => select(selected + 1), arrowdown: () => select(selected + 1),
+    k: () => select(selected - 1), arrowup: () => select(selected - 1),
+    enter: () => capture.suggestion && capture.status === 'new' ? accept(capture, capture.suggestion) : toTask(capture),
+    t: () => toTask(capture),
+    g: () => keep(capture),
+    a: () => capture.status !== 'archived' && file(capture, { as: 'archive' }, 'Archivada'),
+  };
+  const lane = /^[1-6]$/.test(key) ? LANE_KEYS[Number(key) - 1] : null;
+  const action = lane ? () => file(capture, { as: 'task', title: capture.suggestion?.title ?? undefined, lane, day: capture.suggestion?.day ?? null, tags: capture.suggestion?.tags }, `A ${LANE_LABELS[lane]}`) : actions[key];
+  if (!action) return;
+  event.preventDefault();
+  action();
+});
+
+function select(index) {
+  const cards = [...document.querySelectorAll('.drawer-item')];
+  if (!cards.length) return;
+  selected = Math.max(0, Math.min(cards.length - 1, index));
+  cards.forEach((card, i) => card.classList.toggle('selected', i === selected));
+  cards[selected].scrollIntoView({ block: 'nearest' });
+}
 
 export async function renderCaptures(root) {
   const list = await Pausa.captures({ status: tab, search: search || undefined, limit: 300 });
+  current = list.items;
+  selected = Math.min(selected, Math.max(0, current.length - 1));
 
   const box = h('textarea', { rows: 2, maxLength: 4000, placeholder: 'Pega un enlace o escribe una idea', 'aria-label': 'Nueva captura' });
   const add = async (event) => {
@@ -40,22 +74,23 @@ export async function renderCaptures(root) {
   fill(root,
     h('header.view-head', h('div', h('p.eyebrow', 'Cajón'), h('h1', list.waiting ? `${list.waiting} por ordenar` : 'Todo ordenado')), h('div.search', input)),
     h('form.card.capture-new', { onsubmit: add }, box, h('div.actions', h('span.hint', 'Ctrl + Enter para guardar'), h('button.primary', { type: 'submit' }, 'Al cajón'))),
+    list.items.length ? h('p.hint.keys', 'Teclado: J/K para moverte, Enter acepta la sugerencia, T tarea, G biblioteca, A archivar, 1–6 directo a un carril (', LANE_KEYS.map((lane, i) => `${i + 1} ${LANE_LABELS[lane]}`).join(', '), ').') : null,
     h('div.segmented', { role: 'tablist' }, TABS.map((item) => h('button', {
       role: 'tab', 'aria-selected': String(item.status === tab), class: item.status === tab ? 'active' : '',
-      onclick: () => { tab = item.status; state.refresh(); },
+      onclick: () => { tab = item.status; selected = 0; state.refresh(); },
     }, item.label))),
     list.items.length
-      ? h('div.captures', list.items.map(captureCard))
+      ? h('div.captures', list.items.map((capture, index) => captureCard(capture, index)))
       : empty(tab === 'new' ? 'Nada esperando en el cajón.' : 'Aquí no hay nada todavía.', tab === 'new' ? 'Lo que apuntes desde Compartir en el móvil o desde aquí aparece en esta lista.' : null),
   );
   if (search) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
 }
 
-function captureCard(capture) {
+function captureCard(capture, index) {
   const suggestion = capture.suggestion;
   const tags = capture.tags ? String(capture.tags).split(',') : [];
   const host = capture.url ? safeHost(capture.url) : null;
-  return h('article.card.drawer-item',
+  return h('article.card.drawer-item', { class: index === selected ? 'selected' : '', onclick: (event) => { if (!event.target.closest('button, a')) select(index); } },
     h('div.capture-meta',
       capture.kind ? h('span.chip', KIND_LABELS[capture.kind] ?? capture.kind) : null,
       tags.map((tag) => h('span.chip.soft', `#${tag}`)),
