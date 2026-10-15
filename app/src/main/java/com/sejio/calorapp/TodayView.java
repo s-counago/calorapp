@@ -47,6 +47,11 @@ final class TodayView extends PausaUi.Scroll {
     private final PausaUi.Check ritual, habitRitual;
     private final TextView ritualText, habitRitualText;
     private final LinearLayout dayList;
+    /** Sleep, steps, exercise and resting pulse from the watch (feature health_connect). */
+    private final LinearLayout healthCard, healthStats;
+    private final TextView healthNote;
+    private final Button healthConnect;
+    private LinearLayout.LayoutParams cigarettesParams;
     private final TextView tomorrowLine;
     /** Día · Semana · Mes (feature review_zoom). Día shows the usual Hoy; the others swap it for the review. */
     private final PausaUi.Segmented zoom;
@@ -245,7 +250,30 @@ final class TodayView extends PausaUi.Scroll {
         dotsParams.topMargin = dp(10);
         dotsParams.rightMargin = dp(6);
         cigarettes.addView(dots, dotsParams);
-        root.addView(cigarettes, spaced(0, 28));
+        cigarettesParams = spaced(0, 28);
+        root.addView(cigarettes, cigarettesParams);
+
+        // Health from the watch.
+        healthCard = column();
+        healthCard.setBackground(PausaUi.card(activity));
+        healthCard.setPadding(dp(18), dp(12), dp(18), dp(14));
+        TextView healthLabel = PausaUi.text(activity, "Salud del reloj", 13, PausaUi.MUTED, true);
+        healthLabel.setCompoundDrawables(new PausaUi.Symbol(activity, "pulse", PausaUi.SAGE, 16), null, null, null);
+        healthLabel.setCompoundDrawablePadding(dp(6));
+        healthCard.addView(healthLabel, full());
+        healthStats = new LinearLayout(activity);
+        LinearLayout.LayoutParams statsParams = full();
+        statsParams.topMargin = dp(8);
+        healthCard.addView(healthStats, statsParams);
+        healthNote = PausaUi.text(activity, "", 13, PausaUi.MUTED, false);
+        healthNote.setPadding(0, dp(6), 0, 0);
+        healthCard.addView(healthNote, full());
+        healthConnect = PausaUi.action(activity, "Conectar Health Connect", true, () -> HealthConnect.requestPermissions(activity));
+        LinearLayout.LayoutParams connectParams = new LinearLayout.LayoutParams(-1, dp(48));
+        connectParams.topMargin = dp(10);
+        healthCard.addView(healthConnect, connectParams);
+        healthCard.setVisibility(View.GONE);
+        root.addView(healthCard, spaced(0, 28));
 
         // Tu día.
         LinearLayout dayHeader = new LinearLayout(activity);
@@ -353,6 +381,47 @@ final class TodayView extends PausaUi.Scroll {
         if (habitRitual.isChecked() != habits) habitRitual.setChecked(habits);
         strike(habitRitualText, habits);
         refreshDay();
+        refreshHealth();
+    }
+
+    /** Shows what is stored for today at once and asks Health Connect for fresher numbers in the background. */
+    void refreshHealth() {
+        boolean on = Features.isOn(activity, Features.HEALTH_CONNECT) && HealthConnect.available(activity);
+        healthCard.setVisibility(on ? View.VISIBLE : View.GONE);
+        cigarettesParams.bottomMargin = dp(on ? 12 : 28);
+        if (!on) return;
+        boolean granted = HealthConnect.granted(activity);
+        healthConnect.setVisibility(granted ? View.GONE : View.VISIBLE);
+        healthStats.removeAllViews();
+        if (!granted) {
+            healthStats.setVisibility(View.GONE);
+            healthNote.setText("Pausa leerá el sueño, los pasos, el ejercicio y el pulso en reposo que tu reloj guarda en Health Connect.");
+            return;
+        }
+        HealthConnect.Day day = HealthConnect.stored(activity, CalorieStore.today());
+        if (day == null || day.empty()) {
+            healthStats.setVisibility(View.GONE);
+            healthNote.setText("Aún no hay datos de hoy. Si no aparecen, activa en la app de salud de Google que comparta con Health Connect.");
+        } else {
+            healthStats.setVisibility(View.VISIBLE);
+            healthNote.setText("");
+            healthStat("Sueño", day.sleepMinutes == null ? "—" : day.sleepMinutes / 60 + " h " + String.format(PausaUi.SPANISH, "%02d", day.sleepMinutes % 60));
+            healthStat("Pasos", day.steps == null ? "—" : PausaUi.number(day.steps));
+            healthStat("Ejercicio", day.exerciseMinutes == null ? "—" : day.exerciseMinutes + " min");
+            healthStat("Reposo", day.restingHr == null ? "—" : day.restingHr + " lpm");
+        }
+        healthNote.setVisibility(healthNote.getText().length() == 0 ? View.GONE : View.VISIBLE);
+        HealthConnect.refresh(activity, this::refreshHealth);
+    }
+
+    private void healthStat(String label, String value) {
+        LinearLayout stat = column();
+        stat.addView(PausaUi.editorial(activity, value, 19), full());
+        TextView caption = PausaUi.text(activity, label, 12, PausaUi.MUTED, false);
+        caption.setPadding(0, dp(2), 0, 0);
+        stat.addView(caption, full());
+        stat.setContentDescription(label + ": " + value);
+        healthStats.addView(stat, new LinearLayout.LayoutParams(0, -2, 1));
     }
 
     private void refreshCounters() {

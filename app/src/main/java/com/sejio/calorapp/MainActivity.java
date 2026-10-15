@@ -475,6 +475,11 @@ public class MainActivity extends Activity implements TodayView.Host {
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == HealthConnect.REQUEST_PERMISSIONS) {
+            PausaLog.i("health", HealthConnect.granted(this) ? "permissions granted" : "permissions not granted");
+            if (counterView != null) counterView.refreshHealth();
+            return;
+        }
         if (requestCode == REQUEST_NOTIFICATIONS) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) NotificationHelper.show(this);
             else {

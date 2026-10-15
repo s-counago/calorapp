@@ -69,6 +69,9 @@ function upsertStatement(db: D1Database, change: Change, offset: number): D1Prep
   if (change.table === 'habit_checks' && change.id !== `${row.habit_id}:${row.day}`) {
     throw new ValidationError('habit_checks.id must be "<habit_id>:<day>"');
   }
+  if (change.table === 'health_days' && change.id !== row.day) {
+    throw new ValidationError('health_days.id must be the day (YYYY-MM-DD)');
+  }
   const fields = Object.keys(TABLES[change.table].fields);
   const columns = ['id', ...fields, 'updated_at', 'deleted', 'seq'];
   const placeholders = [...columns.slice(0, -1).map(() => '?'), `${SEQ} + ${offset}`];

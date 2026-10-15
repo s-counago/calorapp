@@ -30,6 +30,9 @@ final class SyncSchema {
         tables.put("habit_checks", fields("habit_id", Type.TEXT, "day", Type.TEXT));
         tables.put("metric_entries", fields("day", Type.TEXT, "kind", Type.TEXT, "amount", Type.REAL, "at", Type.INT));
         tables.put("settings", fields("value", Type.TEXT));
+        tables.put("health_days", fields(
+                "day", Type.TEXT, "sleep_minutes", Type.INT, "sleep_start", Type.INT, "sleep_end", Type.INT,
+                "steps", Type.INT, "exercise_minutes", Type.INT, "resting_hr", Type.INT, "source", Type.TEXT));
         TABLES = Collections.unmodifiableMap(tables);
     }
 

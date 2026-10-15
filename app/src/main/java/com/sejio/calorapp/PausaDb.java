@@ -22,7 +22,7 @@ import java.util.UUID;
  */
 final class PausaDb extends SQLiteOpenHelper {
     static final String NAME = "pausa.db";
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
     private static PausaDb instance;
 
     private final Context context;
@@ -54,6 +54,7 @@ final class PausaDb extends SQLiteOpenHelper {
                 + "at INTEGER NOT NULL, " + sync + ")");
         db.execSQL("CREATE INDEX metric_entries_day ON metric_entries (day, kind)");
         db.execSQL("CREATE TABLE settings (id TEXT PRIMARY KEY, value TEXT NOT NULL, " + sync + ")");
+        createHealthDays(db);
         // Local only: habit points are derived on the phone from the checks (see HabitStore).
         db.execSQL("CREATE TABLE habit_scores (habit_id TEXT PRIMARY KEY, json TEXT NOT NULL)");
         // One entry per record with unsent changes. `rev` grows on every edit, so a record edited
@@ -71,6 +72,14 @@ final class PausaDb extends SQLiteOpenHelper {
             db.execSQL("ALTER TABLE tasks ADD COLUMN board TEXT");
             db.execSQL("CREATE INDEX tasks_board ON tasks (board, status)");
         }
+        if (oldVersion < 3) createHealthDays(db);
+    }
+
+    /** Sleep, steps, exercise and resting heart rate per day from Health Connect, see backend migration 0006. */
+    private static void createHealthDays(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE health_days (id TEXT PRIMARY KEY, day TEXT NOT NULL, sleep_minutes INTEGER, sleep_start INTEGER, "
+                + "sleep_end INTEGER, steps INTEGER, exercise_minutes INTEGER, resting_hr INTEGER, source TEXT, "
+                + "updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)");
     }
 
     static String uuid() {
@@ -292,7 +301,7 @@ final class PausaDb extends SQLiteOpenHelper {
     static void resetForTests(Context context) {
         PausaDb db = get(context);
         SQLiteDatabase sql = db.getWritableDatabase();
-        for (String table : new String[]{"tasks", "habits", "habit_checks", "metric_entries", "settings", "habit_scores", "outbox", "sync_state", "log_queue"}) {
+        for (String table : new String[]{"tasks", "habits", "habit_checks", "metric_entries", "settings", "health_days", "habit_scores", "outbox", "sync_state", "log_queue"}) {
             sql.delete(table, null, null);
         }
         db.setState("imported", "1");

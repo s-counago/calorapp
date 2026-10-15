@@ -320,11 +320,12 @@ async function metricTotals(db: D1Database, from: string, to: string) {
 // Summaries -----------------------------------------------------------------------
 
 export async function daySummary(db: D1Database, day: string) {
-  const [totals, goal, plan, habits] = await Promise.all([
+  const [totals, goal, plan, habits, health] = await Promise.all([
     metricTotals(db, day, day),
     goals(db),
     listTasks(db, { plan_date: day }),
     listHabits(db, day),
+    healthDays(db, day, day),
   ]);
   const total = (kind: MetricKind) => totals.find((row) => row.kind === kind)?.total ?? 0;
   return {
@@ -336,6 +337,7 @@ export async function daySummary(db: D1Database, day: string) {
     },
     plan: Object.fromEntries([...SLOTS, null].map((slot) => [slot ?? 'unslotted', plan.filter((task) => (task.plan_slot ?? null) === slot)])),
     habits: habits.map((habit) => ({ id: habit.id, name: habit.name, done: habit.done_today })),
+    health: health[0] ?? null,
   };
 }
 
@@ -368,13 +370,14 @@ export async function review(db: D1Database, anyDay: string, timeZone: string, p
   // Days close at 03:00, so the period runs from 03:00 on its first day to 03:00 after its last.
   const from = dayStartMillis(start, timeZone) + DAY_START_HOUR * 3600_000;
   const to = dayStartMillis(addDays(end, 1), timeZone) + DAY_START_HOUR * 3600_000;
-  const [done, open, totals, goal, habits, checks] = await Promise.all([
+  const [done, open, totals, goal, habits, checks, health] = await Promise.all([
     db.prepare(`SELECT * FROM tasks WHERE deleted = 0 AND status = 'done' AND completed_at >= ? AND completed_at < ? ORDER BY completed_at`).bind(from, to).all<Row>(),
     db.prepare(`SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND ((due_date IS NOT NULL AND due_date <= ?) OR (plan_date IS NOT NULL AND plan_date <= ?)) ORDER BY due_date, plan_date`).bind(end, end).all<Row>(),
     metricTotals(db, start, end),
     goals(db),
     db.prepare(`SELECT * FROM habits WHERE deleted = 0 AND archived = 0 ORDER BY position, name`).all<Row>(),
     db.prepare(`SELECT habit_id, day FROM habit_checks WHERE deleted = 0 AND day BETWEEN ? AND ?`).bind(start, end).all<{ habit_id: string; day: string }>(),
+    healthDays(db, start, end),
   ]);
   const length = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1;
   const days = Array.from({ length }, (_, index) => addDays(start, index));
@@ -408,6 +411,64 @@ export async function review(db: D1Database, anyDay: string, timeZone: string, p
       days_reaching_protein_goal: logged.filter((row) => row.protein >= goal.protein_goal).length,
       per_day: perDay,
     },
+    health: healthAverages(health),
+  };
+}
+
+// Health --------------------------------------------------------------------------
+
+/** What the phone read from Health Connect for one day. Any value can be null when the watch had no data. */
+export interface HealthDay {
+  day: string;
+  sleep_minutes: number | null;
+  sleep_start: number | null;
+  sleep_end: number | null;
+  steps: number | null;
+  exercise_minutes: number | null;
+  resting_hr: number | null;
+  source: string | null;
+  updated_at: number;
+}
+
+/** Health days between `from` and `to` (inclusive), oldest first. Days without a row are left out. */
+export async function healthDays(db: D1Database, from: string, to: string): Promise<HealthDay[]> {
+  const { results } = await db
+    .prepare(`SELECT * FROM health_days WHERE deleted = 0 AND day BETWEEN ? AND ? ORDER BY day`)
+    .bind(from, to)
+    .all<Row>();
+  return results.map((row) => ({ ...(toRecord('health_days', row) as Omit<HealthDay, 'updated_at'>), updated_at: Number(row.updated_at) }));
+}
+
+export const MAX_HEALTH_DAYS = 366;
+
+/**
+ * Health per day between `from` and `to` with their averages. Both default to the last 7 days
+ * ending today; the range can be at most a year.
+ */
+export async function healthSummary(db: D1Database, today: string, from?: unknown, to?: unknown) {
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  for (const value of [from, to]) {
+    if (value !== undefined && (typeof value !== 'string' || !DAY.test(value))) throw new ValidationError('from and to must be YYYY-MM-DD');
+  }
+  const end = (to as string | undefined) ?? today;
+  const start = (from as string | undefined) ?? addDays(end, -6);
+  const length = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1;
+  if (length < 1) throw new ValidationError('from must be on or before to');
+  if (length > MAX_HEALTH_DAYS) throw new ValidationError(`At most ${MAX_HEALTH_DAYS} days at a time`);
+  return { from: start, to: end, ...healthAverages(await healthDays(db, start, end)) };
+}
+
+/** Averages over the days that have each value, so a night without the watch does not pull them down. */
+export function healthAverages(days: HealthDay[]) {
+  const average = (key: 'sleep_minutes' | 'steps' | 'resting_hr') => {
+    const values = days.map((row) => row[key]).filter((value): value is number => typeof value === 'number');
+    return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
+  };
+  return {
+    days_with_data: days.length,
+    average: { sleep_minutes: average('sleep_minutes'), steps: average('steps'), resting_hr: average('resting_hr') },
+    exercise_minutes_total: days.reduce((sum, row) => sum + (row.exercise_minutes ?? 0), 0),
+    per_day: days.map(({ updated_at: _, ...row }) => row),
   };
 }
 
@@ -430,6 +491,12 @@ export const FEATURES = [
     key: 'task_kanban',
     title: 'Tablero Kanban en Tareas',
     description: 'Un segmento Kanban en Tareas con stack infinito, prioridad, baúl y fracasos, y el contador de tareas hechas.',
+    default: false,
+  },
+  {
+    key: 'health_connect',
+    title: 'Salud del reloj',
+    description: 'Sueño, pasos, ejercicio y pulso en reposo del Pixel Watch, leídos de Health Connect y mostrados en Hoy.',
     default: false,
   },
 ] as const;

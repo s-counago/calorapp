@@ -3,6 +3,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Health Connect (Android 14+): what the Pixel Watch writes there, read only. -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
 
     <application
         android:name=".PausaApp"
@@ -34,6 +39,18 @@
         <activity android:name=".CalendarConnectionActivity" android:exported="false" />
         <activity android:name=".CloudActivity" android:exported="false" />
         <activity android:name=".DiagnosticsActivity" android:exported="false" />
+        <activity android:name=".HealthPrivacyActivity" android:exported="false" />
+        <!-- Health Connect opens this to show why Pausa reads health data; required before it grants access. -->
+        <activity-alias
+            android:name=".ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".HealthPrivacyActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
         <service android:name=".CalendarSyncJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
 
         <activity
