@@ -36,7 +36,32 @@ final class TaskStore {
     static Task fromRow(Map<String, Object> row) {
         return new Task((Long) row.get("local_id"), (String) row.get("title"), "done".equals(row.get("status")),
                 Long.valueOf(1).equals(row.get("following")), text(row.get("waiting_for")),
-                text(row.get("expected_date")), text(row.get("review_date")), (String) row.get("board"));
+                text(row.get("expected_date")), text(row.get("review_date")), (String) row.get("board"), (String) row.get("habit_id"));
+    }
+
+    /**
+     * A task made from a habit for one day: lane prioridad, any time that day, linked to the habit so
+     * completing one marks the other. Asking twice for the same habit and day returns the same task,
+     * as habitToTask does in the backend. The Calendar sync adds it as an all-day event.
+     */
+    static long addFromHabit(Context context, HabitStore.Habit habit, String day) {
+        LegacyImport.runOnce(context);
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT local_id FROM tasks WHERE deleted = 0 AND habit_id = ? "
+                + "AND plan_date = ? AND status != 'cancelled' LIMIT 1", habit.uid, day)) {
+            return (Long) row.get("local_id");
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("title", habit.name);
+        data.put("board", "priority");
+        data.put("status", "todo");
+        data.put("created_at", System.currentTimeMillis());
+        data.put("following", 0);
+        data.put("plan_date", day);
+        data.put("habit_id", habit.uid);
+        long id = PausaDb.get(context).put("tasks", PausaDb.uuid(), data, false, nextLocalId(context));
+        PausaLog.i("tasks", "habit task " + day);
+        changed(context);
+        return id;
     }
 
     static long add(Context context, String text) {
@@ -75,6 +100,11 @@ final class TaskStore {
         data.put("status", done ? "done" : "todo");
         data.put("completed_at", done ? System.currentTimeMillis() : null);
         update(context, id, data);
+        // A task made from a habit marks (or unmarks) the habit on its day.
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT t.plan_date, h.local_id FROM tasks t JOIN habits h ON h.id = t.habit_id "
+                + "WHERE t.local_id = ? AND t.plan_date IS NOT NULL AND h.deleted = 0", String.valueOf(id))) {
+            HabitStore.setDoneOnDay(context, (Long) row.get("local_id"), (String) row.get("plan_date"), done);
+        }
     }
 
     static void setText(Context context, long id, String text) {
@@ -273,6 +303,8 @@ final class TaskStore {
         final String waitingFor, expectedDate, reviewDate;
         /** Kanban column, or null for an ordinary task. */
         final String board;
+        /** Backend id of the habit this task was made from, or null. */
+        final String habitId;
 
         Task(long id, String text, boolean done) {
             this(id, text, done, false, "", "", "", null);
@@ -283,7 +315,13 @@ final class TaskStore {
         }
 
         Task(long id, String text, boolean done, boolean following, String waitingFor, String expectedDate, String reviewDate, String board) {
+            this(id, text, done, following, waitingFor, expectedDate, reviewDate, board, null);
+        }
+
+        Task(long id, String text, boolean done, boolean following, String waitingFor, String expectedDate, String reviewDate, String board,
+                String habitId) {
             this.board = board;
+            this.habitId = habitId;
             this.id = id;
             this.text = text;
             this.done = done;
@@ -294,7 +332,7 @@ final class TaskStore {
         }
 
         Task copy(String text, boolean done) {
-            return new Task(id, text, done, following, waitingFor, expectedDate, reviewDate, board);
+            return new Task(id, text, done, following, waitingFor, expectedDate, reviewDate, board, habitId);
         }
     }
 }

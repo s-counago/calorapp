@@ -38,6 +38,8 @@ final class TodayView extends PausaUi.Scroll {
     private final Host host;
     private final LinearLayout root;
     private final TextView eyebrow, greeting;
+    /** The tagline under the greeting, or the focus note when there is one (feature focus_note). */
+    private final TextView tagline;
     private final Meters.SunGauge gauge;
     private final TextView calorieText, calorieOf, calorieStatus, limitChip;
     private final TextView proteinText, proteinGoal;
@@ -110,7 +112,10 @@ final class TodayView extends PausaUi.Scroll {
         greeting.setPadding(0, dp(8), 0, dp(6));
         if (Build.VERSION.SDK_INT >= 28) greeting.setAccessibilityHeading(true);
         hello.addView(greeting, full());
-        hello.addView(PausaUi.text(activity, "Cosas pequeñas. Grandes días.", 14, PausaUi.MUTED, false), full());
+        tagline = PausaUi.text(activity, TAGLINE, 14, PausaUi.MUTED, false);
+        tagline.setLineSpacing(0, 1.15f);
+        tagline.setOnClickListener(v -> { if (Features.isOn(activity, Features.FOCUS_NOTE)) editNote(); });
+        hello.addView(tagline, full());
         root.addView(hello, spaced(20, 22));
 
         // Calories hero.
@@ -371,6 +376,7 @@ final class TodayView extends PausaUi.Scroll {
         String date = new SimpleDateFormat("EEEE · d 'de' MMMM", PausaUi.SPANISH).format(new Date());
         eyebrow.setText(date.toUpperCase(PausaUi.SPANISH));
         greeting.setText(PausaUi.greeting() + ".");
+        refreshNote();
         root.setBackground(new PausaUi.Glow(PausaUi.skyColor()));
         refreshCounters();
         TaskStore.resetDailyNotionReview(activity);
@@ -382,6 +388,74 @@ final class TodayView extends PausaUi.Scroll {
         strike(habitRitualText, habits);
         refreshDay();
         refreshHealth();
+    }
+
+    private static final String TAGLINE = "Cosas pequeñas. Grandes días.";
+
+    /** A thin italic line with the note for these days; without a note, the usual tagline. */
+    private void refreshNote() {
+        boolean on = Features.isOn(activity, Features.FOCUS_NOTE);
+        NoteStore.Note note = on ? NoteStore.active(activity, DayPlanStore.day(0)) : null;
+        tagline.setText(note == null ? TAGLINE : note.text);
+        tagline.setTypeface(tagline.getTypeface(), note == null ? android.graphics.Typeface.NORMAL : android.graphics.Typeface.ITALIC);
+        tagline.setTextColor(note == null ? PausaUi.MUTED : PausaUi.INK);
+        tagline.setClickable(on);
+        tagline.setBackground(on ? PausaUi.ripple(activity, android.graphics.Color.TRANSPARENT, 10) : null);
+        tagline.setContentDescription(!on ? TAGLINE : note == null ? "Escribir una nota para estos días" : "Nota: " + note.text + ". Editar");
+    }
+
+    private void editNote() {
+        NoteStore.Note note = NoteStore.get(activity);
+        PausaUi.Sheet sheet = new PausaUi.Sheet(activity, "Nota para estos días");
+        sheet.subtitle("Una frase o un plan concreto. Se queda bajo el saludo, sin molestar.");
+        EditText input = new EditText(activity);
+        PausaUi.input(input);
+        input.setHint("Esta semana, solo lo de Prioridad");
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        input.setMaxLines(4);
+        input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(NoteStore.MAX)});
+        if (note != null) { input.setText(note.text); input.setSelection(input.length()); }
+        sheet.add(input, 14);
+        sheet.add(PausaUi.eyebrow(activity, "Hasta", PausaUi.MUTED), 8);
+        // Until: no end, this Sunday, or a week from today.
+        String today = DayPlanStore.day(0);
+        String sunday = HabitStore.addDays(HabitStore.weekStart(today), 6);
+        String[] until = {note == null ? null : note.until};
+        String week = HabitStore.addDays(today, 6);
+        // A last day set elsewhere (e.g. by an agent) gets its own chip so saving keeps it.
+        boolean other = until[0] != null && !until[0].equals(sunday) && !until[0].equals(week);
+        String[] values = other ? new String[]{null, sunday, week, until[0]} : new String[]{null, sunday, week};
+        String[] labels = other ? new String[]{"Sin fecha", "El domingo", "Una semana", "Hasta el " + until[0].substring(8) + "/" + until[0].substring(5, 7)}
+                : new String[]{"Sin fecha", "El domingo", "Una semana"};
+        LinearLayout chips = new LinearLayout(activity);
+        TextView[] views = new TextView[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            final int index = i;
+            views[i] = PausaUi.chip(activity, labels[i], false, () -> {
+                until[0] = values[index];
+                for (int j = 0; j < views.length; j++) PausaUi.setChip(views[j], j == index);
+            });
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-2, -2);
+            p.rightMargin = dp(8);
+            chips.addView(views[i], p);
+        }
+        int selected = 0;
+        for (int i = 0; i < values.length; i++) if (values[i] != null && values[i].equals(until[0])) selected = i;
+        PausaUi.setChip(views[selected], true);
+        android.widget.HorizontalScrollView chipScroll = new android.widget.HorizontalScrollView(activity);
+        chipScroll.setHorizontalScrollBarEnabled(false);
+        chipScroll.addView(chips);
+        sheet.add(chipScroll, 8);
+        sheet.footer(note == null ? null : PausaUi.quiet(activity, "Quitar", PausaUi.TERRACOTTA, () -> {
+            NoteStore.set(activity, "", null);
+            sheet.dialog.dismiss();
+            refreshNote();
+        }), PausaUi.action(activity, "Guardar", true, () -> {
+            NoteStore.set(activity, input.getText().toString(), until[0]);
+            sheet.dialog.dismiss();
+            refreshNote();
+        }));
+        sheet.show();
     }
 
     /** Shows what is stored for today at once and asks Health Connect for fresher numbers in the background. */

@@ -78,11 +78,13 @@ final class DayPlanStore {
                 if (row == null) continue;
                 double position = j + 1;
                 Object current = row.get("position");
-                if (date.equals(row.get("plan_date")) && SyncSchema.SLOTS[i].equals(row.get("plan_slot"))
+                // A task for any time that day (no slot, e.g. made from a habit) shows under the morning and keeps no slot.
+                boolean anyTime = i == 0 && date.equals(row.get("plan_date")) && row.get("plan_slot") == null;
+                if (date.equals(row.get("plan_date")) && (anyTime || SyncSchema.SLOTS[i].equals(row.get("plan_slot")))
                         && current instanceof Number && ((Number) current).doubleValue() == position) continue;
                 Map<String, Object> data = new HashMap<>();
                 data.put("plan_date", date);
-                data.put("plan_slot", SyncSchema.SLOTS[i]);
+                data.put("plan_slot", anyTime ? null : SyncSchema.SLOTS[i]);
                 data.put("position", position);
                 db.put("tasks", (String) row.get("id"), data, false);
             }
