@@ -129,6 +129,24 @@ public final class BudgetUiSmokeTest extends Instrumentation {
             check(BudgetStore.load(context).planned.containsValue(55_000L), "this cycle's amount is saved");
             unsecure();
 
+            AccessibilityNodeInfo protein = findContains("Proteína,");
+            check(protein != null, "protein cap tile present");
+            tapNode(protein);
+            capture("budget-22-tope.png");
+            tap("Apuntar gasto", false);
+            AccessibilityNodeInfo logged = find("Importe en euros", true);
+            Bundle milk = new Bundle();
+            milk.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "6,40");
+            logged.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, milk);
+            settle();
+            tap("Apuntar", false);
+            SystemClock.sleep(600);
+            Budget.Rule cap = BudgetStore.load(context).rule("proteina");
+            check(cap.logs.size() == 1 && cap.logs.get(0)[1] == 640, "hand-logged cap spending is saved");
+            check(findContains("Llevas 6,40") != null, "the cap shows what has been spent");
+            capture("budget-23-tope-apuntado.png");
+            unsecure();
+
             tap("Movimientos", false);
             SystemClock.sleep(600);
             unsecure();
