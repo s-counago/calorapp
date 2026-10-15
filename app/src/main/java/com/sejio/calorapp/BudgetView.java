@@ -165,6 +165,7 @@ final class BudgetView extends LinearLayout {
         int today = today();
         boolean wasLast = snapshot == null || index == snapshot.last();
         snapshot = Budget.snapshot(txns, BudgetStore.load(getContext()), today);
+        BudgetCloud.upload(getContext(), snapshot);
         if (index < snapshot.first() || index > snapshot.last() || (fresh && wasLast)) index = snapshot.last();
         render();
     }

@@ -31,3 +31,7 @@ tools/renfe-seat-monitor.pid
 *.jks
 *.keystore
 *.log
+
+# Backend local dev
+backend/.wrangler/
+backend/.dev.vars

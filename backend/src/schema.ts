@@ -102,6 +102,30 @@ export const TABLES = {
       source: { type: 'text', max: 100 },
     },
   },
+  /** Money summary of one payday-to-payday cycle, id = its first day. Written by the phone; no movements. */
+  budget_cycles: {
+    fields: {
+      start: { type: 'day', required: true },
+      end: { type: 'day', required: true },
+      current: { type: 'bool', default: false },
+      income: { type: 'int' },
+      fixed: { type: 'int' },
+      saved: { type: 'int' },
+      savings_target: { type: 'int' },
+      free_budget: { type: 'int' },
+      free_spent: { type: 'int' },
+      available: { type: 'int' },
+      daily_allowance: { type: 'int' },
+      projection: { type: 'int' },
+      savings_at_close: { type: 'int' },
+      unexpected: { type: 'int' },
+      covered: { type: 'int' },
+      cushion_left: { type: 'int' },
+      lines: { type: 'text', max: 50000 },
+      categories: { type: 'text', max: 20000 },
+      computed_at: { type: 'int' },
+    },
+  },
 } as const satisfies Record<string, TableSpec>;
 
 export type TableName = keyof typeof TABLES;

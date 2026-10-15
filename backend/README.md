@@ -3,10 +3,10 @@
 Un único Cloudflare Worker con D1 que sirve tres cosas:
 
 - **API de sincronización** para la app Android, que sigue funcionando sin conexión.
-- **Web** para usar Pausa desde el ordenador (`public/`, de momento solo un esqueleto).
+- **Web** para usar Pausa desde el ordenador (`public/`, ver abajo).
 - **Servidor MCP** en `/mcp` para que Claude u otros agentes lean y editen los datos.
 
-Solo entra una cuenta de Google, la de `ALLOWED_EMAIL`. La banca no pasa por aquí: se queda cifrada en el móvil.
+Solo entra una cuenta de Google, la de `ALLOWED_EMAIL`. La banca no pasa por aquí: los movimientos y las credenciales se quedan cifrados en el móvil; solo sube, si lo enciendes, el resumen de cada ciclo (`budget_cycles`).
 
 ## Datos
 
@@ -17,6 +17,7 @@ Solo entra una cuenta de Google, la de `ALLOWED_EMAIL`. La banca no pasa por aqu
 | `metric_entries` | Calorías, proteína y cigarros como entradas sueltas (+300 kcal a las 14:02), no como un total. |
 | `settings` | Objetivos diarios (`calorie_goal`, `protein_goal`, `cigarette_goal`) y `tasks_done_base`, las tareas hechas antes del tablero (el contador de Notion). |
 | `health_days` | Una fila por día (el id es el propio día) con lo que el móvil lee de Health Connect: minutos dormidos la noche que acaba ese día, inicio y fin del sueño, pasos, minutos de ejercicio y pulso en reposo. Solo la escribe el teléfono. |
+| `budget_cycles` | El resumen de cada ciclo de nómina a nómina que calcula el móvil (id = primer día): ingresos, fijos, ahorro, dinero libre, colchón, cada línea y tope con lo previsto y lo pagado, y el gasto libre por categoría, en céntimos. Sin movimientos, comercios, cuentas ni credenciales. Solo lo escribe el teléfono, y solo con la función `budget_cloud`. |
 | `devices` | Teléfonos con sesión iniciada; solo se guarda el hash del token. |
 
 ## Sincronización
@@ -43,16 +44,20 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | Ruta | Uso |
 | --- | --- |
 | `GET/POST /api/sync` | Sincronización (ver arriba). |
-| `GET /api/tasks` | Filtros: `status`, `plan_date`, `project`, `due_before`, `following` (`true`/`false`), `board` (columna o `none`), `search`, `limit`. |
+| `GET /api/tasks` | Filtros: `status`, `plan_date`, `plan_from` y `plan_to` (rango del plan), `project`, `due_before`, `following` (`true`/`false`), `board` (columna o `none`), `search`, `limit`. |
 | `POST /api/tasks`, `PATCH/DELETE /api/tasks/<id>` | Crear, editar y borrar. |
 | `POST /api/tasks/import` | `{ "items": [{ "title", "notes", "board", "status", "source", "source_id", "created_at" }] }`, hasta 200. Se salta lo ya importado con el mismo `source` y `source_id`. |
 | `GET /api/board`, `PUT /api/board/done` | Tareas abiertas por columna y `done_total` (`tasks_done_base` + tareas del tablero hechas). `PUT` con `{ "total" }` corrige el total. |
-| `GET/POST /api/habits`, `POST /api/habits/<id>/check` | Hábitos de la semana y marcar un día (`{ "day", "done" }`). |
+| `GET/POST /api/habits`, `POST /api/habits/<id>/check` | Hábitos de la semana con sus puntos, racha y gráfica (`?day=&weeks=`, de 10 a 104 semanas) y marcar un día (`{ "day", "done" }`). |
+| `PATCH/DELETE /api/habits/<id>` | Cambiar nombre, objetivo semanal (1 a 7), `archived` o `position`, y borrar. |
+| `GET /api/counters?day=&kind=` | Entradas de un día, en orden. Las correcciones son negativas. |
 | `POST /api/counters` | `{ "kind": "calories" \| "protein" \| "cigarettes", "amount", "day" }`. |
 | `PUT /api/counters` | `{ "kind", "total", "day" }`: fija el total de un día (añade la diferencia como corrección). Para días olvidados. |
+| `GET/PUT /api/goals` | Objetivos diarios: `calorie_goal` (kcal), `protein_goal` (g) y `cigarette_goal`. `PUT` cambia solo los que envíes. |
 | `GET /api/day?day=` | Contadores frente a objetivos, plan por franjas y hábitos del día. |
 | `GET /api/review?day=&period=` | Revisión de la semana (lunes a domingo, `period=week`, por defecto) o del mes (`period=month`) que contiene ese día. |
 | `GET /api/health?from=&to=` | Sueño, pasos, ejercicio y pulso en reposo por día (`health_days`) y sus medias. Por defecto, los 7 días que acaban hoy; como mucho un año. `GET /api/day` y `GET /api/review` también los incluyen en `health`. |
+| `GET /api/budget?day=` | Resumen de dinero del ciclo que contiene ese día (por defecto el último) y la lista de ciclos. |
 | `GET /api/features` | Funciones activables de las apps y si están encendidas. |
 | `PUT /api/features/<clave>` | `{ "enabled": true \| false }`: enciende o apaga una función. Se guarda como el ajuste `feature:<clave>`. |
 | `GET /api/devices`, `DELETE /api/devices/<id>` | Dispositivos con sesión. |
@@ -64,11 +69,26 @@ Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
 
 ## MCP
 
-Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `tasks_overview` (cuentas por carril, plan del día y lo que quedó de días anteriores), `move_task` (cambiar de carril), `plan_task` (día, franja, hora y duración), `board_summary`, `set_done_total`, `import_tasks`, `list_habits`, `create_habit`, `check_habit`, `habit_to_task` (un hábito como tarea de hoy o mañana), `capture`, `list_captures`, `suggest_capture` y `file_capture` (el cajón), `get_note` y `set_note` (la nota discreta de Hoy), `log_counter`, `set_counter`, `day_summary`, `weekly_review` (semana o mes), `health_days` (sueño, pasos, ejercicio y pulso del reloj), `list_features` y `set_feature`.
+Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `tasks_overview` (cuentas por carril, plan del día y lo que quedó de días anteriores), `move_task` (cambiar de carril), `plan_task` (día, franja, hora y duración), `board_summary`, `set_done_total`, `import_tasks`, `list_habits` (con puntos y racha), `create_habit`, `update_habit`, `delete_habit`, `check_habit`, `habit_to_task` (un hábito como tarea de hoy o mañana), `capture`, `list_captures`, `suggest_capture` y `file_capture` (el cajón), `get_note` y `set_note` (la nota discreta de Hoy), `log_counter`, `set_counter`, `counter_entries`, `set_goals`, `day_summary`, `weekly_review` (semana o mes), `health_days` (sueño, pasos, ejercicio y pulso del reloj), `budget` (resumen del dinero por ciclo, solo lectura), `list_features` y `set_feature`.
 
 Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 
 Para conectarlo en Claude: Ajustes → Conectores → Añadir conector personalizado → `https://<tu-worker>/mcp`.
+
+## Web
+
+`public/` es una app de una sola página en JavaScript sin dependencias ni paso de compilación (`index.html`, `styles.css`, `js/app.js` y una vista por archivo en `js/views/`). Solo entra con la sesión de Google y usa la misma API REST que el móvil, así que lo que cambies allí llega al teléfono en su siguiente sincronización.
+
+- **Hoy:** la nota de estos días (`focus_note`, clic para editarla); contadores con los botones rápidos del móvil, corregir el total, poner a cero y cambiar el objetivo; plan del día por franjas (arrastrar entre franjas, «Añadir de tu lista»); hábitos del día; salud; lo de mañana; entradas del día. Se puede abrir cualquier día para corregirlo.
+- **Semana:** los siete días con sus franjas, lo que quedó atrás, tu lista y Prioridad a un lado; se planifica arrastrando.
+- **Bandeja, Carriles y Esperando:** como en el móvil. Carriles sale solo con `task_kanban`.
+- **Cajón** (`captures`): apuntar enlaces e ideas, aceptar la sugerencia de un agente, convertir en tarea, guardar en la biblioteca con etiquetas, archivar o borrar. Se ordena con el teclado: J/K, Enter acepta la sugerencia, T, G, A y 1–6 manda a un carril.
+- **Hábitos:** puntos, racha y gráfica de 10 a 104 semanas, corregir cualquier semana pasada, crear, editar, archivar y borrar.
+- **Resumen** (`review_zoom`) y **Salud** (`health_connect`).
+- **Ajustes:** funciones, objetivos, dispositivos con su estado de sincronización y logs de las apps.
+- La caja **Apuntar** (atajo `/`) crea una tarea; `+350` suma calorías, `p30` proteína y `c1` un cigarro.
+
+**Dinero** (`budget_cloud`) enseña el resumen del ciclo que sube el móvil: disponible, topes, fijos y gasto por categoría. Lo que vive solo en el móvil (movimientos y credenciales, Viajes, Google Calendar y rituales) no aparece. Cada petición manda `X-Request-Id` (`web-…`); los fallos se muestran con ese id y se suben a `POST /api/logs` con la etiqueta `web`, así que salen en `get_client_logs`.
 
 ## Observabilidad
 

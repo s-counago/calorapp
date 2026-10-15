@@ -20,6 +20,12 @@ import {
   getTask,
   importTasks,
   listHabits,
+  updateHabit,
+  deleteHabit,
+  counterEntries,
+  setGoals,
+  GOAL_DEFAULTS,
+  budgetSummary,
   listTasks,
   currentDay,
   logMetric,
@@ -119,13 +125,15 @@ const TOOLS: Tool[] = [
   {
     name: 'list_tasks',
     title: 'List tasks',
-    description: 'Lists tasks, open ones first. Filter by status, lane, planned day, project, due date, follow-up or text. Each task carries its lane.',
+    description: 'Lists tasks, open ones first. Filter by status, lane, planned day or range of days, project, due date, follow-up or text. Each task carries its lane.',
     readOnly: true,
     inputSchema: {
       type: 'object',
       properties: {
         status: taskFields.status,
         plan_date: taskFields.plan_date,
+        plan_from: { ...day, description: 'Only tasks planned on or after this day.' },
+        plan_to: { ...day, description: 'Only tasks planned on or before this day. With status todo, finds plans left undone.' },
         project: { type: 'string' },
         due_before: { ...day, description: 'Only tasks due on or before this day.' },
         following: { type: 'boolean', description: 'true for follow-ups only, false to leave them out.' },
@@ -273,10 +281,15 @@ const TOOLS: Tool[] = [
   {
     name: 'list_habits',
     title: 'List habits',
-    description: 'Lists active habits with their weekly goal and the days done this week.',
+    description:
+      'Lists active habits with their weekly goal (days per week), the days done in the week of the given day and their points: ' +
+      'points (total), streak (weeks in a row meeting the goal), week_count, minimum_met, next_reward (points the next check adds), ' +
+      'last_week_penalty and sparkline (points at the end of each of the last `weeks` weeks, oldest first). ' +
+      'A week meeting the goal earns 5 points the first time and 15 % more each week in a row, plus 20 % of that per extra day; ' +
+      'a finished week that misses it loses 15 % of the points.',
     readOnly: true,
-    inputSchema: { type: 'object', properties: { day } },
-    run: (env, args) => listHabits(env.DB, dayArg(env, args.day)),
+    inputSchema: { type: 'object', properties: { day, weeks: { type: 'integer', minimum: 10, maximum: 104, description: 'Weeks in the sparkline. Default 10.' } } },
+    run: (env, args) => listHabits(env.DB, dayArg(env, args.day), args.weeks as number | undefined),
   },
   {
     name: 'create_habit',
@@ -291,6 +304,38 @@ const TOOLS: Tool[] = [
     run: async (env, args) => ({
       id: await createHabit(env.DB, { name: stringArg(args.name, 'name'), weekly_goal: args.weekly_goal as number | undefined }, today(env)),
     }),
+  },
+  {
+    name: 'update_habit',
+    title: 'Update a habit',
+    description: 'Renames a habit, changes its weekly goal (1 to 7 days), archives it (archived: true hides it everywhere) or changes its position in the list.',
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        weekly_goal: { type: 'integer', minimum: 1, maximum: 7 },
+        archived: { type: 'boolean' },
+        position: { type: 'number', description: 'Order in the list, lowest first.' },
+      },
+      required: ['id'],
+    },
+    run: (env, args) => {
+      const { id, ...patch } = args;
+      return updateHabit(env.DB, stringArg(id, 'id'), patch);
+    },
+  },
+  {
+    name: 'delete_habit',
+    title: 'Delete a habit',
+    description: 'Deletes a habit and its points on every device. Prefer update_habit with archived: true to keep the history.',
+    readOnly: false,
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    run: async (env, args) => {
+      await deleteHabit(env.DB, stringArg(args.id, 'id'));
+      return { deleted: args.id };
+    },
   },
   {
     name: 'check_habit',
@@ -477,6 +522,28 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'counter_entries',
+    title: 'Counter entries of a day',
+    description: 'Every entry logged for calories (kcal), protein (g) and cigarettes on a day, with the time (at, epoch ms). Corrections and resets are negative amounts.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { day, kind: { type: 'string', enum: [...METRIC_KINDS] } } },
+    run: async (env, args) => {
+      const target = dayArg(env, args.day);
+      return { day: target, entries: await counterEntries(env.DB, target, args.kind as string | undefined) };
+    },
+  },
+  {
+    name: 'set_goals',
+    title: 'Set daily goals',
+    description: `Changes the daily goals: calorie_goal (kcal limit, default ${GOAL_DEFAULTS.calorie_goal}), protein_goal (grams to reach, default ${GOAL_DEFAULTS.protein_goal}) and cigarette_goal (daily maximum, default ${GOAL_DEFAULTS.cigarette_goal}). Pass only the ones to change. Returns all goals.`,
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: { calorie_goal: { type: 'integer', minimum: 0 }, protein_goal: { type: 'integer', minimum: 0 }, cigarette_goal: { type: 'integer', minimum: 0 } },
+    },
+    run: (env, args) => setGoals(env.DB, args),
+  },
+  {
     name: 'day_summary',
     title: 'Day summary',
     description: 'Counters against their goals, the day plan by slot and which habits are done.',
@@ -514,6 +581,19 @@ const TOOLS: Tool[] = [
       },
     },
     run: (env, args) => healthSummary(env.DB, today(env), args.from, args.to),
+  },
+  {
+    name: 'budget',
+    title: 'Money summary of a cycle',
+    description:
+      'The payday-to-payday budget the phone works out, for the cycle containing `day` (default: the latest). Amounts are euro cents. ' +
+      'Includes income, fixed, saved and savings_target, free money (free_budget, free_spent, available, daily_allowance, projection, ' +
+      'savings_at_close), unexpected and cushion, lines (fixed charges and caps/topes with expected, paid, logged and status) and ' +
+      'free spending per category, plus the list of cycles. Read only and only a summary: bank movements and credentials never leave the phone. ' +
+      'Empty until the budget_cloud feature is on and the phone has opened Dinero.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { day: { ...day, description: 'Any day of the cycle (YYYY-MM-DD). Defaults to the latest cycle.' } } },
+    run: (env, args) => budgetSummary(env.DB, args.day === undefined ? undefined : dayArg(env, args.day)),
   },
   {
     name: 'list_features',
@@ -632,7 +712,7 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
           title: tool.title,
           description: tool.description,
           inputSchema: tool.inputSchema,
-          annotations: { readOnlyHint: tool.readOnly, destructiveHint: tool.name === 'delete_task', openWorldHint: false },
+          annotations: { readOnlyHint: tool.readOnly, destructiveHint: tool.name.startsWith('delete_'), openWorldHint: false },
         })),
       });
     case 'tools/call': {

@@ -41,7 +41,10 @@ final class Features {
     static final Feature FOCUS_NOTE = new Feature("focus_note", "Nota en Hoy",
             "Una frase o un plan para los próximos días, en una línea discreta bajo el saludo de Hoy.", false);
 
-    static final Feature[] ALL = {REVIEW_ZOOM, TASK_KANBAN, HABIT_TASKS, FOCUS_NOTE, HEALTH_CONNECT};
+    static final Feature BUDGET_CLOUD = new Feature("budget_cloud", "Dinero en la web",
+            "Sube el resumen de cada ciclo (presupuesto, topes y gasto por categoría) para verlo en la web. Los movimientos y las credenciales no salen del teléfono.", false);
+
+    static final Feature[] ALL = {REVIEW_ZOOM, TASK_KANBAN, HABIT_TASKS, FOCUS_NOTE, BUDGET_CLOUD, HEALTH_CONNECT};
 
     private Features() {}
 

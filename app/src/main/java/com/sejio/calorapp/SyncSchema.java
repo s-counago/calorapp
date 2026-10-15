@@ -34,6 +34,13 @@ final class SyncSchema {
         tables.put("health_days", fields(
                 "day", Type.TEXT, "sleep_minutes", Type.INT, "sleep_start", Type.INT, "sleep_end", Type.INT,
                 "steps", Type.INT, "exercise_minutes", Type.INT, "resting_hr", Type.INT, "source", Type.TEXT));
+        // Money summary per payday cycle (see BudgetCloud); no movements. Amounts in cents.
+        tables.put("budget_cycles", fields(
+                "start", Type.TEXT, "end", Type.TEXT, "current", Type.BOOL, "income", Type.INT, "fixed", Type.INT,
+                "saved", Type.INT, "savings_target", Type.INT, "free_budget", Type.INT, "free_spent", Type.INT,
+                "available", Type.INT, "daily_allowance", Type.INT, "projection", Type.INT, "savings_at_close", Type.INT,
+                "unexpected", Type.INT, "covered", Type.INT, "cushion_left", Type.INT, "lines", Type.TEXT,
+                "categories", Type.TEXT, "computed_at", Type.INT));
         TABLES = Collections.unmodifiableMap(tables);
     }
 

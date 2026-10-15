@@ -39,6 +39,12 @@ import {
   getTask,
   importTasks,
   listHabits,
+  updateHabit,
+  deleteHabit,
+  counterEntries,
+  setGoals,
+  goals,
+  budgetSummary,
   listTasks,
   moveTask,
   planTask,
@@ -305,6 +311,8 @@ app.get('/api/tasks', async (c) => {
     await listTasks(c.env.DB, {
       status: query.status,
       plan_date: query.plan_date,
+      plan_from: query.plan_from,
+      plan_to: query.plan_to,
       project: query.project,
       due_before: query.due_before,
       following: query.following === undefined ? undefined : query.following === 'true',
@@ -338,12 +346,20 @@ app.delete('/api/tasks/:id', async (c) => {
   return c.body(null, 204);
 });
 
-app.get('/api/habits', async (c) => c.json(await listHabits(c.env.DB, dayQuery(c))));
+app.get('/api/habits', async (c) => {
+  const weeks = c.req.query('weeks');
+  return c.json(await listHabits(c.env.DB, dayQuery(c), weeks === undefined ? undefined : Number(weeks)));
+});
 app.post('/api/habits', async (c) => {
   const body = await c.req.json<{ name?: unknown; weekly_goal?: unknown }>();
   if (typeof body.name !== 'string' || !body.name) throw new ValidationError('name is required');
   const id = await createHabit(c.env.DB, { name: body.name, weekly_goal: body.weekly_goal as number | undefined }, today(c));
   return c.json({ id }, 201);
+});
+app.patch('/api/habits/:id', async (c) => c.json(await updateHabit(c.env.DB, c.req.param('id'), await c.req.json())));
+app.delete('/api/habits/:id', async (c) => {
+  await deleteHabit(c.env.DB, c.req.param('id'));
+  return c.body(null, 204);
 });
 app.post('/api/habits/:id/check', async (c) => {
   const body = await c.req.json<{ day?: string; done?: boolean }>().catch(() => ({}) as { day?: string; done?: boolean });
@@ -359,6 +375,8 @@ app.post('/api/habits/:id/task', async (c) => {
   return c.json(await habitToTask(c.env.DB, c.req.param('id'), day), 201);
 });
 
+app.get('/api/counters', async (c) => c.json({ day: dayQuery(c), entries: await counterEntries(c.env.DB, dayQuery(c), c.req.query('kind')) }));
+
 app.post('/api/counters', async (c) => {
   const body = await c.req.json<{ kind?: MetricKind; amount?: unknown; day?: string }>();
   if (typeof body.amount !== 'number' || !Number.isFinite(body.amount)) throw new ValidationError('amount must be a number');
@@ -373,6 +391,8 @@ app.put('/api/counters', async (c) => {
   return c.json(await setMetricTotal(c.env.DB, body.kind as MetricKind, body.total as number, day));
 });
 
+app.get('/api/goals', async (c) => c.json(await goals(c.env.DB)));
+app.put('/api/goals', async (c) => c.json(await setGoals(c.env.DB, await c.req.json())));
 app.get('/api/captures', async (c) => {
   const query = c.req.query();
   return c.json(
@@ -407,6 +427,12 @@ app.get('/api/review', async (c) =>
 );
 
 app.get('/api/health', async (c) => c.json(await healthSummary(c.env.DB, today(c), c.req.query('from'), c.req.query('to'))));
+
+app.get('/api/budget', async (c) => {
+  const day = c.req.query('day');
+  if (day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ValidationError('day must be YYYY-MM-DD');
+  return c.json(await budgetSummary(c.env.DB, day));
+});
 
 app.get('/api/features', async (c) => c.json({ items: await listFeatures(c.env.DB) }));
 app.put('/api/features/:key', async (c) => {
