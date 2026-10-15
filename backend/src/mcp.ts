@@ -27,6 +27,12 @@ import {
   setMetricTotal,
   setHabitCheck,
   updateTask,
+  LANES,
+  moveTask,
+  planTask,
+  habitToTask,
+  tasksOverview,
+  addDays,
   type ImportItem,
   FEATURES,
   REVIEW_PERIODS,
@@ -57,6 +63,17 @@ const taskFields = {
   waiting_for: { type: 'string', description: 'Follow-ups only: who or what the task is waiting for.' },
   expected_date: { ...day, description: 'Follow-ups only: when the answer is expected (YYYY-MM-DD).' },
   review_date: { ...day, description: 'Follow-ups only: when to check on it again (YYYY-MM-DD).' },
+  lane: {
+    type: 'string',
+    enum: [...LANES],
+    description:
+      'What the task is to Sejio, one per task: inbox (bandeja, captured and not yet sorted), priority (prioridad real), ' +
+      'stack (stack infinito, someday/maybe), waiting (esperando a otra persona), vault (baúl) or failed (fracasos, given up). ' +
+      'Setting it also sets board and following. A lane is independent of the day the task is planned on.',
+  },
+  plan_time: { type: ['string', 'null'], description: 'Set time on plan_date as HH:MM (Europe/Madrid), or null for no set time.' },
+  plan_minutes: { type: ['integer', 'null'], minimum: 1, maximum: 1440, description: 'How long the task takes, in minutes.' },
+  habit_id: { type: ['string', 'null'], description: 'Habit this task comes from. Completing the task checks the habit on plan_date.' },
   board: {
     type: ['string', 'null'],
     enum: [...BOARD_COLUMNS, null],
@@ -94,7 +111,7 @@ const TOOLS: Tool[] = [
   {
     name: 'list_tasks',
     title: 'List tasks',
-    description: 'Lists tasks, open ones first. Filter by status, planned day, project, due date, follow-up or text.',
+    description: 'Lists tasks, open ones first. Filter by status, lane, planned day, project, due date, follow-up or text. Each task carries its lane.',
     readOnly: true,
     inputSchema: {
       type: 'object',
@@ -105,6 +122,7 @@ const TOOLS: Tool[] = [
         due_before: { ...day, description: 'Only tasks due on or before this day.' },
         following: { type: 'boolean', description: 'true for follow-ups only, false to leave them out.' },
         board: { type: 'string', enum: [...BOARD_COLUMNS, 'none'], description: 'Only tasks in this Kanban column, or none for tasks off the board.' },
+        lane: { ...taskFields.lane, description: 'Only tasks in this lane (inbox, priority, stack, waiting, vault, failed).' },
         search: { type: 'string', description: 'Text to find in the title or notes.' },
         limit: { type: 'integer', minimum: 1, maximum: 1000 },
       },
@@ -156,6 +174,45 @@ const TOOLS: Tool[] = [
       await deleteTask(env.DB, stringArg(args.id, 'id'));
       return { deleted: args.id };
     },
+  },
+  {
+    name: 'tasks_overview',
+    title: 'Tasks overview',
+    description:
+      'Open tasks per lane (inbox, priority, stack, waiting, vault, failed), the plan of a day grouped as any_time, morning, afternoon ' +
+      'and evening, left_over (open tasks planned on an earlier day) and done_total, the running count of completed tasks.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { day } },
+    run: (env, args) => tasksOverview(env.DB, dayArg(env, args.day)),
+  },
+  {
+    name: 'move_task',
+    title: 'Move a task to a lane',
+    description: 'Moves a task to another lane: inbox, priority, stack, waiting, vault or failed (giving it up). Its planned day, if any, stays.',
+    readOnly: false,
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, lane: taskFields.lane }, required: ['id', 'lane'] },
+    run: (env, args) => moveTask(env.DB, stringArg(args.id, 'id'), args.lane),
+  },
+  {
+    name: 'plan_task',
+    title: 'Plan a task on a day',
+    description:
+      'Puts a task on a day. slot (morning, afternoon, evening) and time (HH:MM, Europe/Madrid) are optional: with only a time, the ' +
+      'slot follows it (before 12:00 morning, before 20:00 afternoon, then evening); with neither, the task is for any time that day. ' +
+      'minutes is how long it takes. Pass day null to take the task off its day.',
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        day: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'YYYY-MM-DD, or null to unplan.' },
+        slot: { type: ['string', 'null'], enum: [...SLOTS, null] },
+        time: { type: ['string', 'null'], pattern: '^\\d{1,2}:\\d{2}$', description: 'HH:MM, e.g. 18:30.' },
+        minutes: { type: ['integer', 'null'], minimum: 1, maximum: 1440 },
+      },
+      required: ['id', 'day'],
+    },
+    run: (env, args) => planTask(env.DB, stringArg(args.id, 'id'), args as never),
   },
   {
     name: 'board_summary',
@@ -241,6 +298,27 @@ const TOOLS: Tool[] = [
       const target = dayArg(env, args.day);
       await setHabitCheck(env.DB, stringArg(args.habit_id, 'habit_id'), target, args.done !== false);
       return { habit_id: args.habit_id, day: target, done: args.done !== false };
+    },
+  },
+  {
+    name: 'habit_to_task',
+    title: 'Turn a habit into a task',
+    description:
+      'Makes a task from a habit for today or tomorrow (or a given YYYY-MM-DD), in the priority lane, for any time that day. ' +
+      'Completing the task checks the habit that day and checking the habit completes the task. Asking again for the same habit ' +
+      'and day returns the existing task. The phone also adds it to Google Calendar as an all-day event.',
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        habit_id: { type: 'string' },
+        day: { type: 'string', description: 'today (default), tomorrow, or a date as YYYY-MM-DD. Days close at 03:00 Europe/Madrid.' },
+      },
+      required: ['habit_id'],
+    },
+    run: (env, args) => {
+      const day = args.day === undefined || args.day === 'today' ? today(env) : args.day === 'tomorrow' ? addDays(today(env), 1) : dayArg(env, args.day);
+      return habitToTask(env.DB, stringArg(args.habit_id, 'habit_id'), day);
     },
   },
   {
