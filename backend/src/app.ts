@@ -31,18 +31,22 @@ import { parseClientLogs, queryClientLogs, recordPull, recordPush, storeClientLo
 import { isTableName } from './schema';
 import {
   NotFoundError,
+  boardSummary,
   createHabit,
   createTask,
   daySummary,
   deleteTask,
   getTask,
+  importTasks,
   listHabits,
   listTasks,
   currentDay,
   logMetric,
+  setDoneTotal,
   setHabitCheck,
   setMetricTotal,
   updateTask,
+  type ImportItem,
   review,
   listFeatures,
   setFeature,
@@ -290,10 +294,20 @@ app.get('/api/tasks', async (c) => {
       project: query.project,
       due_before: query.due_before,
       following: query.following === undefined ? undefined : query.following === 'true',
+      board: query.board,
       search: query.search,
       limit: query.limit ? Number(query.limit) : undefined,
     }),
   );
+});
+app.post('/api/tasks/import', async (c) => {
+  const body = await c.req.json<{ items?: unknown }>();
+  return c.json(await importTasks(c.env.DB, body.items as ImportItem[]), 201);
+});
+app.get('/api/board', async (c) => c.json(await boardSummary(c.env.DB)));
+app.put('/api/board/done', async (c) => {
+  const body = await c.req.json<{ total?: unknown }>();
+  return c.json(await setDoneTotal(c.env.DB, body.total as number));
 });
 app.get('/api/tasks/:id', async (c) => c.json(await getTask(c.env.DB, c.req.param('id'))));
 app.post('/api/tasks', async (c) => c.json(await createTask(c.env.DB, await c.req.json()), 201));

@@ -8,6 +8,9 @@ export const GOAL_DEFAULTS = { calorie_goal: 2450, protein_goal: 120, cigarette_
 export const METRIC_KINDS = ['calories', 'protein', 'cigarettes'] as const;
 export type MetricKind = (typeof METRIC_KINDS)[number];
 export const SLOTS = ['morning', 'afternoon', 'evening'] as const;
+/** Kanban columns, in board order: stack infinito, prioridad, baúl, fracasos. */
+export const BOARD_COLUMNS = ['stack', 'priority', 'vault', 'failed'] as const;
+export type BoardColumn = (typeof BOARD_COLUMNS)[number];
 
 export class NotFoundError extends Error {}
 
@@ -73,6 +76,8 @@ export interface TaskFilter {
   project?: string;
   due_before?: string;
   following?: boolean;
+  /** A column, or 'none' for tasks that are not on the board. */
+  board?: string;
   search?: string;
   limit?: number;
 }
@@ -84,6 +89,8 @@ export async function listTasks(db: D1Database, filter: TaskFilter = {}): Promis
   if (filter.plan_date) { where.push('plan_date = ?'); params.push(filter.plan_date); }
   if (filter.project) { where.push('project = ?'); params.push(filter.project); }
   if (filter.following !== undefined) { where.push('following = ?'); params.push(filter.following ? 1 : 0); }
+  if (filter.board === 'none') where.push('board IS NULL');
+  else if (filter.board) { where.push('board = ?'); params.push(filter.board); }
   if (filter.due_before) { where.push('due_date IS NOT NULL AND due_date <= ?'); params.push(filter.due_before); }
   if (filter.search) { where.push("(title LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')"); const like = `%${filter.search.replace(/[\\%_]/g, '\\$&')}%`; params.push(like, like); }
   const limit = Math.min(Math.max(filter.limit ?? 200, 1), 1000);
@@ -103,7 +110,7 @@ export async function getTask(db: D1Database, id: string): Promise<Task> {
   return taskFromRow(row);
 }
 
-const TASK_EDITABLE = ['title', 'notes', 'status', 'project', 'area', 'priority', 'due_date', 'plan_date', 'plan_slot', 'position', 'source', 'source_id', 'following', 'waiting_for', 'expected_date', 'review_date'] as const;
+const TASK_EDITABLE = ['title', 'notes', 'status', 'project', 'area', 'priority', 'due_date', 'plan_date', 'plan_slot', 'position', 'source', 'source_id', 'following', 'waiting_for', 'expected_date', 'review_date', 'board'] as const;
 
 export async function createTask(db: D1Database, input: Record<string, unknown>): Promise<Task> {
   const id = typeof input.id === 'string' ? input.id : crypto.randomUUID();
@@ -128,6 +135,100 @@ export async function updateTask(db: D1Database, id: string, patch: Record<strin
 export async function deleteTask(db: D1Database, id: string): Promise<void> {
   const current = await getTask(db, id);
   await save(db, 'tasks', id, current, true);
+}
+
+// Board ---------------------------------------------------------------------------
+
+/** Tasks done before Pausa had a board (the old Notion count) live in this setting. */
+export const DONE_BASE_SETTING = 'tasks_done_base';
+
+async function doneBase(db: D1Database): Promise<number> {
+  const row = await db.prepare(`SELECT value FROM settings WHERE id = ? AND deleted = 0`).bind(DONE_BASE_SETTING).first<{ value: string }>();
+  const value = Number(row?.value);
+  return Number.isFinite(value) ? value : 0;
+}
+
+async function doneOnBoard(db: D1Database): Promise<number> {
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM tasks WHERE deleted = 0 AND board IS NOT NULL AND status = 'done'`).first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/** Open tasks per column and the running total of tasks done. */
+export async function boardSummary(db: D1Database) {
+  const { results } = await db
+    .prepare(`SELECT board, COUNT(*) AS n FROM tasks WHERE deleted = 0 AND status = 'todo' AND board IS NOT NULL GROUP BY board`)
+    .all<{ board: BoardColumn; n: number }>();
+  const [base, done] = await Promise.all([doneBase(db), doneOnBoard(db)]);
+  return {
+    columns: Object.fromEntries(BOARD_COLUMNS.map((column) => [column, results.find((row) => row.board === column)?.n ?? 0])),
+    done_total: base + done,
+  };
+}
+
+/** Sets the total of tasks done by moving the base, so board tasks completed elsewhere still add up. */
+export async function setDoneTotal(db: D1Database, total: number) {
+  if (typeof total !== 'number' || !Number.isInteger(total) || total < 0) throw new ValidationError('total must be an integer >= 0');
+  const [base, done] = await Promise.all([doneBase(db), doneOnBoard(db)]);
+  await save(db, 'settings', DONE_BASE_SETTING, { value: String(total - done) });
+  const previous = base + done;
+  return { previous, done_total: total };
+}
+
+export interface ImportItem {
+  title: string;
+  notes?: string | null;
+  board?: BoardColumn | null;
+  status?: 'todo' | 'done' | 'cancelled';
+  source: string;
+  source_id: string;
+  created_at?: number;
+}
+
+export const MAX_IMPORT = 200;
+
+/**
+ * Creates tasks from another tool (e.g. Notion). Items whose source and source_id already exist
+ * are skipped, so running the same import twice changes nothing.
+ */
+export async function importTasks(db: D1Database, items: ImportItem[]) {
+  if (!Array.isArray(items) || items.length === 0) throw new ValidationError('items must be a non-empty array');
+  if (items.length > MAX_IMPORT) throw new ValidationError(`At most ${MAX_IMPORT} items per call`);
+  const existing = new Set<string>();
+  for (const source of new Set(items.map((item) => item?.source))) {
+    if (typeof source !== 'string') continue;
+    const { results } = await db.prepare(`SELECT source_id FROM tasks WHERE source = ? AND deleted = 0`).bind(source).all<{ source_id: string }>();
+    for (const row of results) existing.add(`${source}\u0000${row.source_id}`);
+  }
+  const now = Date.now();
+  const changes = [];
+  const skipped: string[] = [];
+  for (const [index, item] of items.entries()) {
+    if (!item || typeof item.source !== 'string' || !item.source || typeof item.source_id !== 'string' || !item.source_id) {
+      throw new ValidationError(`items[${index}] needs source and source_id`);
+    }
+    const key = `${item.source}\u0000${item.source_id}`;
+    if (existing.has(key)) { skipped.push(item.source_id); continue; }
+    existing.add(key);
+    const status = item.status ?? 'todo';
+    changes.push({
+      table: 'tasks' as const,
+      id: crypto.randomUUID(),
+      updated_at: now,
+      deleted: false,
+      data: {
+        title: item.title,
+        notes: item.notes ?? null,
+        status,
+        board: item.board ?? null,
+        source: item.source,
+        source_id: item.source_id,
+        created_at: typeof item.created_at === 'number' ? item.created_at : now,
+        completed_at: status === 'done' ? now : null,
+      },
+    });
+  }
+  const { applied } = await applyChanges(db, changes);
+  return { created: applied.length, skipped: skipped.length, ids: applied };
 }
 
 // Habits --------------------------------------------------------------------------
@@ -323,6 +424,12 @@ export const FEATURES = [
     key: 'review_zoom',
     title: 'Resumen Día · Semana · Mes',
     description: 'Un selector encima de Hoy para alejarte del día y ver la semana o el mes: salud, hábitos, tareas y dinero.',
+    default: false,
+  },
+  {
+    key: 'task_kanban',
+    title: 'Tablero Kanban en Tareas',
+    description: 'Un segmento Kanban en Tareas con stack infinito, prioridad, baúl y fracasos, y el contador de tareas hechas.',
     default: false,
   },
 ] as const;

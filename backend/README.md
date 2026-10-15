@@ -12,10 +12,10 @@ Solo entra una cuenta de Google, la de `ALLOWED_EMAIL`. La banca no pasa por aqu
 
 | Tabla | Qué guarda |
 | --- | --- |
-| `tasks` | Tareas con proyecto, área, prioridad, fecha límite, día y franja del plan, origen (`source`, `source_id`) para importar desde Notion y seguimiento: `following` marca las tareas que esperan a alguien (`waiting_for`, `expected_date`, `review_date`) y no entran en el plan. |
+| `tasks` | Tareas con proyecto, área, prioridad, fecha límite, día y franja del plan, origen (`source`, `source_id`) para importar desde Notion y seguimiento: `following` marca las tareas que esperan a alguien (`waiting_for`, `expected_date`, `review_date`) y no entran en el plan. `board` coloca la tarea en el tablero Kanban: `stack` (stack infinito), `priority` (prioridad), `vault` (baúl) o `failed` (fracasos); vacío si es una tarea normal. |
 | `habits`, `habit_checks` | Hábitos con objetivo semanal y una fila por día hecho (`<habit_id>:<día>`). |
 | `metric_entries` | Calorías, proteína y cigarros como entradas sueltas (+300 kcal a las 14:02), no como un total. |
-| `settings` | Objetivos diarios (`calorie_goal`, `protein_goal`, `cigarette_goal`). |
+| `settings` | Objetivos diarios (`calorie_goal`, `protein_goal`, `cigarette_goal`) y `tasks_done_base`, las tareas hechas antes del tablero (el contador de Notion). |
 | `devices` | Teléfonos con sesión iniciada; solo se guarda el hash del token. |
 
 ## Sincronización
@@ -42,8 +42,10 @@ Todas las rutas `/api/*` necesitan sesión o token de dispositivo.
 | Ruta | Uso |
 | --- | --- |
 | `GET/POST /api/sync` | Sincronización (ver arriba). |
-| `GET /api/tasks` | Filtros: `status`, `plan_date`, `project`, `due_before`, `following` (`true`/`false`), `search`, `limit`. |
+| `GET /api/tasks` | Filtros: `status`, `plan_date`, `project`, `due_before`, `following` (`true`/`false`), `board` (columna o `none`), `search`, `limit`. |
 | `POST /api/tasks`, `PATCH/DELETE /api/tasks/<id>` | Crear, editar y borrar. |
+| `POST /api/tasks/import` | `{ "items": [{ "title", "notes", "board", "status", "source", "source_id", "created_at" }] }`, hasta 200. Se salta lo ya importado con el mismo `source` y `source_id`. |
+| `GET /api/board`, `PUT /api/board/done` | Tareas abiertas por columna y `done_total` (`tasks_done_base` + tareas del tablero hechas). `PUT` con `{ "total" }` corrige el total. |
 | `GET/POST /api/habits`, `POST /api/habits/<id>/check` | Hábitos de la semana y marcar un día (`{ "day", "done" }`). |
 | `POST /api/counters` | `{ "kind": "calories" \| "protein" \| "cigarettes", "amount", "day" }`. |
 | `PUT /api/counters` | `{ "kind", "total", "day" }`: fija el total de un día (añade la diferencia como corrección). Para días olvidados. |
@@ -60,7 +62,7 @@ Las fechas son `YYYY-MM-DD` en `Europe/Madrid` (`TIME_ZONE`).
 
 ## MCP
 
-Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `set_counter`, `day_summary`, `weekly_review` (semana o mes), `list_features` y `set_feature`.
+Herramientas de datos: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `board_summary`, `set_done_total`, `import_tasks`, `list_habits`, `create_habit`, `check_habit`, `log_counter`, `set_counter`, `day_summary`, `weekly_review` (semana o mes), `list_features` y `set_feature`.
 
 Herramientas de diagnóstico, de solo lectura: `get_client_logs`, `sync_status` y `record_history`. Lo que haga un agente llega al móvil en la siguiente sincronización.
 

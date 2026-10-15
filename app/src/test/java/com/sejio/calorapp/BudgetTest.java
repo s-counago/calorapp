@@ -156,8 +156,8 @@ public final class BudgetTest {
         assertEquals(846, cycle.saved); // Investing is savings, not a fixed line.
         assertEquals(846, cycle.savingsReserve());
         assertEquals(Budget.PAID, line(cycle, "gimnasio").status);
-        // Transfers to Trade Republic, card repayments and inbound transfers are not spending.
-        assertEquals(770 + 540, cycle.freeSpent);
+        // Transfers to Trade Republic, card repayments and inbound transfers are not spending; tobacco goes to its cap.
+        assertEquals(540, cycle.freeSpent);
         assertNotNull(cycle.habit);
         assertEquals(3, cycle.habit.count);
         assertEquals(cycle.income() - cycle.fixed() - cycle.savingsReserve() - cycle.freeSpent, cycle.available());
@@ -249,7 +249,7 @@ public final class BudgetTest {
         Budget.Cycle uncovered = Budget.cycle(first, first.last());
         assertEquals(34000, uncovered.unexpected);
         assertEquals(34000, uncovered.uncovered());
-        assertEquals(770 + 540, uncovered.freeSpent); // Not mixed with free spending.
+        assertEquals(540, uncovered.freeSpent); // Not mixed with free spending (tobacco has its own cap).
         settings.cushion = 50000; settings.cushionDay = day("2026-09-01");
         Budget.Snapshot second = Budget.snapshot(txns, settings, day("2026-10-05"));
         Budget.Cycle covered = Budget.cycle(second, second.last());
@@ -395,6 +395,87 @@ public final class BudgetTest {
         long[] history = Budget.savingsHistory(spender, spender.last(), 6);
         assertEquals(spender.last() - spender.first() + 1, history.length);
         assertEquals(fast.savingsAtClose(), history[history.length - 1]);
+    }
+
+    @Test public void capsKeepTheirWholeAmountReservedAndTakeHandLoggedSpending() throws Exception {
+        typicalMonths();
+        account("2026-10-03", "-23.45", "MERCADONA SANTA MARTA");
+        List<Ledger.Txn> txns = Ledger.fromDatabase(rows, MADRID);
+        Budget.Settings settings = Budget.Settings.defaults();
+        Budget.Snapshot first = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Cycle before = Budget.cycle(first, first.last());
+        Budget.Line tobacco = line(before, "tabaco"), protein = line(before, "proteina");
+        // One 7,70 purchase does not settle tobacco: the rest of the 95 stays reserved.
+        assertEquals(Budget.PARTIAL, tobacco.status);
+        assertEquals(770, tobacco.paid);
+        assertEquals(9_500, tobacco.committed());
+        assertEquals(Budget.PARTIAL, protein.status);
+        assertEquals(9_000, protein.committed());
+        long freeBefore = before.freeSpent, availableBefore = before.available();
+
+        // Protein milk inside the Mercadona receipt, logged by hand: it leaves free spending and fills the cap.
+        settings.rule("proteina").logs.add(new long[]{day("2026-10-03"), 640});
+        settings = Budget.Settings.fromJson(new JSONObject(settings.toJson().toString()));
+        Budget.Snapshot snapshot = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Cycle cycle = Budget.cycle(snapshot, snapshot.last());
+        protein = line(cycle, "proteina");
+        assertEquals(640, protein.paid);
+        assertEquals(640, protein.logged);
+        assertEquals(9_000, protein.committed());
+        assertEquals(freeBefore - 640, cycle.freeSpent);
+        assertEquals(availableBefore + 640, cycle.available()); // Only the double count goes away.
+
+        // Past the cap, what was really spent counts; a closed cycle keeps only what was spent.
+        settings.rule("tabaco").expected = 500;
+        Budget.Cycle over = Budget.cycle(Budget.snapshot(txns, settings, day("2026-10-05")), snapshot.last());
+        assertEquals(Budget.PAID, line(over, "tabaco").status);
+        assertEquals(770, line(over, "tabaco").committed());
+        account("2026-10-30", "1408.25", "EMPRESA SL NOMINA");
+        Budget.Snapshot later = Budget.snapshot(Ledger.fromDatabase(rows, MADRID), settings, day("2026-11-05"));
+        Budget.Line closed = line(Budget.cycle(later, snapshot.last()), "proteina");
+        assertEquals(Budget.PAID, closed.status);
+        assertEquals(640, closed.committed());
+    }
+
+    @Test public void movementsFiledUnderTobaccoCountInItsCap() throws Exception {
+        typicalMonths();
+        trade("2026-10-03T19:00:00Z", "card_successful_transaction", "-5.00", "BAR O PINCHO");
+        List<Ledger.Txn> txns = Ledger.fromDatabase(rows, MADRID);
+        Budget.Settings settings = Budget.Settings.defaults();
+        Budget.Snapshot plain = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Entry bar = null;
+        for (Budget.Entry entry : plain.entries) if (entry.merchant.toUpperCase().contains("PINCHO")) bar = entry;
+        settings.txn.put(bar.txn.id, "cat:tabaco"); // A machine in a bar, filed as tobacco by hand.
+        settings = Budget.Settings.fromJson(new JSONObject(settings.toJson().toString()));
+        Budget.Snapshot snapshot = Budget.snapshot(txns, settings, day("2026-10-05"));
+        Budget.Line tobacco = line(Budget.cycle(snapshot, snapshot.last()), "tabaco");
+        assertEquals(770 + 500, tobacco.paid);
+        assertEquals(Budget.PARTIAL, tobacco.status);
+        // Settings saved by 6.12.0 learn the category on upgrade.
+        JSONObject three = settings.toJson().put("version", 3);
+        three.getJSONArray("rules").getJSONObject(indexOf(settings, "tabaco")).put("category", "");
+        assertEquals("tabaco", Budget.Settings.fromJson(three).rule("tabaco").category);
+    }
+
+    private static int indexOf(Budget.Settings settings, String id) {
+        for (int i = 0; i < settings.rules.size(); i++) if (settings.rules.get(i).id.equals(id)) return i;
+        return -1;
+    }
+
+    @Test public void versionTwoSettingsGainTheCapsOnce() throws Exception {
+        Budget.Settings two = Budget.Settings.defaults();
+        two.rules.remove(two.rule("tabaco"));
+        two.rules.remove(two.rule("proteina"));
+        JSONObject json = two.toJson().put("version", 2);
+        Budget.Settings upgraded = Budget.Settings.fromJson(json);
+        assertTrue(upgraded.rule("tabaco").cap);
+        assertEquals(9_500, upgraded.rule("tabaco").expected);
+        assertFalse(upgraded.rule("tabaco").learn);
+        assertEquals(9_000, upgraded.rule("proteina").expected);
+        assertEquals(two.rules.size() + 2, upgraded.rules.size());
+        // Removed after the upgrade, a cap stays removed.
+        upgraded.rules.remove(upgraded.rule("tabaco"));
+        assertNull(Budget.Settings.fromJson(upgraded.toJson()).rule("tabaco"));
     }
 
     private static Budget.Line line(Budget.Cycle cycle, String id) {

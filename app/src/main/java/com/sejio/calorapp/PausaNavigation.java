@@ -15,7 +15,7 @@ import android.widget.TextView;
 
 /**
  * Floating bottom navigation. A cream pill of light glides behind the selected destination.
- * Sections: 0 Hoy (diario), 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero.
+ * Sections: 0 Hoy (diario), 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero, 8 Kanban.
  */
 final class PausaNavigation extends LinearLayout {
     interface Listener { void select(int section); }
@@ -74,7 +74,7 @@ final class PausaNavigation extends LinearLayout {
 
     void select(int section, boolean animate) {
         int index = tabFor(section);
-        if (section == 2 || (section >= 4 && section <= 6)) taskSection = section;
+        if (section == 2 || (section >= 4 && section <= 6) || section == 8) taskSection = section;
         boolean changed = index != selected;
         selected = index;
         for (int i = 0; i < tabs.length; i++) {

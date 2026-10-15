@@ -122,11 +122,17 @@ describe('mcp', () => {
     expect(summary.structuredContent.habits).toEqual([expect.objectContaining({ name: 'Meditar', done: true })]);
     expect(summary.structuredContent.plan.evening.map((task: any) => task.id)).toEqual([taskId]);
 
+    const imported = await tool(token, 'import_tasks', { items: [{ title: 'Idea', board: 'stack', source: 'notion', source_id: 'p1' }] });
+    expect(imported.structuredContent).toMatchObject({ created: 1, skipped: 0 });
+    await tool(token, 'set_done_total', { total: 10 });
+    const board = await tool(token, 'board_summary');
+    expect(board.structuredContent).toEqual({ columns: { stack: 1, priority: 0, vault: 0, failed: 0 }, done_total: 10 });
+
     const month = await tool(token, 'weekly_review', { day: '2026-10-14', period: 'month' });
     expect(month.structuredContent).toMatchObject({ period: 'month', start: '2026-10-01', end: '2026-10-31' });
 
     const features = await tool(token, 'list_features');
-    expect(features.structuredContent.items).toEqual([expect.objectContaining({ key: 'review_zoom', enabled: false })]);
+    expect(features.structuredContent.items).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'review_zoom', enabled: false })]));
     const switched = await tool(token, 'set_feature', { key: 'review_zoom', enabled: true });
     expect(switched.structuredContent).toMatchObject({ key: 'review_zoom', enabled: true });
 

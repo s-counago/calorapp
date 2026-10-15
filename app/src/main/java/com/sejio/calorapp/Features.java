@@ -29,7 +29,10 @@ final class Features {
     static final Feature REVIEW_ZOOM = new Feature("review_zoom", "Resumen Día · Semana · Mes",
             "Un selector encima de Hoy para alejarte del día y ver la semana o el mes.", false);
 
-    static final Feature[] ALL = {REVIEW_ZOOM};
+    static final Feature TASK_KANBAN = new Feature("task_kanban", "Tablero Kanban en Tareas",
+            "Un segmento Kanban en Tareas con stack infinito, prioridad, baúl y fracasos, y el contador de tareas hechas.", false);
+
+    static final Feature[] ALL = {REVIEW_ZOOM, TASK_KANBAN};
 
     private Features() {}
 

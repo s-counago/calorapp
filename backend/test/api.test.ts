@@ -73,11 +73,14 @@ describe('api', () => {
   it('switches features on and off as synced settings', async () => {
     const token = await deviceToken();
     const list = async () => ((await (await json('/api/features', token)).json()) as any).items;
-    expect(await list()).toEqual([expect.objectContaining({ key: 'review_zoom', enabled: false, default: false })]);
+    expect(await list()).toEqual([
+      expect.objectContaining({ key: 'review_zoom', enabled: false, default: false }),
+      expect.objectContaining({ key: 'task_kanban', enabled: false, default: false }),
+    ]);
 
     const on = (await (await json('/api/features/review_zoom', token, { method: 'PUT', body: JSON.stringify({ enabled: true }) })).json()) as any;
     expect(on).toMatchObject({ key: 'review_zoom', enabled: true });
-    expect(await list()).toEqual([expect.objectContaining({ key: 'review_zoom', enabled: true })]);
+    expect(await list()).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'review_zoom', enabled: true })]));
     const { changes } = (await (await json('/api/sync?since=0', token)).json()) as any;
     expect(changes).toEqual([expect.objectContaining({ table: 'settings', id: 'feature:review_zoom', data: { value: 'on' } })]);
 
