@@ -200,7 +200,7 @@ final class HabitListView extends LinearLayout {
         PausaUi.Check mark = new PausaUi.Check(c, PausaUi.SAGE);
         mark.setDiameter(34);
         mark.setChecked(HabitStore.isDoneToday(habit));
-        mark.setContentDescription(habit.name + ", marcar para hoy");
+        mark.setContentDescription(habit.name + (HabitStore.isDoneToday(habit) ? ", hecho hoy. Desmarcar" : ", marcar para hoy"));
         mark.setListener(checked -> onMark(habit, checked));
         titleRow.addView(mark, new LayoutParams(dp(60), dp(60)));
         card.addView(titleRow, full());
