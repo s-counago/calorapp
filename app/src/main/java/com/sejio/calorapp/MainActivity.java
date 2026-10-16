@@ -267,6 +267,7 @@ public class MainActivity extends Activity implements TodayView.Host {
 
     private void featuresChanged() {
         counterView.refresh();
+        NotificationHelper.show(this);
         buildTaskTabs();
         boolean wasV7 = v7;
         v7 = Features.isOn(this, Features.PAUSA_V7);

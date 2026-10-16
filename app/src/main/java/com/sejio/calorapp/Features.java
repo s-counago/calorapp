@@ -50,7 +50,10 @@ final class Features {
     static final Feature BUDGET_CLOUD = new Feature("budget_cloud", "Dinero en la web",
             "Sube el resumen de cada ciclo (presupuesto, topes y gasto por categoría) para verlo en la web. Los movimientos y las credenciales no salen del teléfono.", false);
 
-    static final Feature[] ALL = {PAUSA_V7, CAPTURES, REVIEW_ZOOM, TASK_KANBAN, HABIT_TASKS, FOCUS_NOTE, BUDGET_CLOUD, HEALTH_CONNECT};
+    static final Feature NOTIFICATION_PANEL = new Feature("notification_panel", "Panel en la notificación",
+            "La notificación fija pasa a ser un solo panel con calorías, proteína y cigarros, botones cortos y un fondo que cambia con la luz del día.", false);
+
+    static final Feature[] ALL = {PAUSA_V7, CAPTURES, REVIEW_ZOOM, TASK_KANBAN, HABIT_TASKS, FOCUS_NOTE, BUDGET_CLOUD, HEALTH_CONNECT, NOTIFICATION_PANEL};
 
     private Features() {}
 

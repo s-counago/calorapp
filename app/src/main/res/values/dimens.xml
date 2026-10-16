@@ -1,0 +1,5 @@
+<resources>
+    <!-- Notification panel (NotificationHelper). Android 12+ caps custom content at 48dp collapsed and 252dp expanded. -->
+    <dimen name="notification_panel_height">184dp</dimen>
+    <dimen name="notification_compact_height">44dp</dimen>
+</resources>
