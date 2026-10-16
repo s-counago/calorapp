@@ -76,7 +76,10 @@ final class PausaUi {
 
     /** The light of the hour: sun in the morning, terracotta in the evening, sage at night. */
     static int skyColor() {
-        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        return skyColor(Calendar.getInstance().get(Calendar.HOUR_OF_DAY));
+    }
+
+    static int skyColor(int hour) {
         return hour >= 6 && hour < 14 ? SUN : hour >= 14 && hour < 21 ? TERRACOTTA : SAGE;
     }
 
@@ -766,6 +769,19 @@ final class PausaUi {
             Path path = new Path(); path.moveTo(points[0], points[1]);
             for (int i=2; i<points.length; i+=2) path.lineTo(points[i], points[i+1]); c.drawPath(path, p);
         }
+        /**
+         * An open circle whose arrowhead sits exactly on the end of the arc and follows its
+         * tangent, so the head never floats off the line. Angles as in drawArc (clockwise, from 3 o'clock).
+         */
+        void arcArrow(Canvas c, float cx, float cy, float r, float start, float sweep) {
+            c.drawArc(cx - r, cy - r, cx + r, cy + r, start, sweep, false, p);
+            double end = Math.toRadians(start + sweep), dir = Math.signum(sweep);
+            float x = cx + (float) (r * Math.cos(end)), y = cy + (float) (r * Math.sin(end));
+            float dx = (float) (-Math.sin(end) * dir), dy = (float) (Math.cos(end) * dir); // travel direction
+            float len = 3.2f, spread = 2.9f;
+            line(c, x - dx * len - dy * spread, y - dy * len + dx * spread, x + dx * .6f, y + dy * .6f,
+                    x - dx * len + dy * spread, y - dy * len - dx * spread);
+        }
         @Override public void draw(Canvas c) {
             c.save(); c.translate(getBounds().left, getBounds().top); c.scale(getBounds().width()/24f, getBounds().height()/24f);
             switch(name) {
@@ -798,8 +814,9 @@ final class PausaUi {
                     c.drawRoundRect(3,5,21,21,4,4,p); line(c,7,3,7,7); line(c,17,3,17,7); line(c,3,10,21,10);
                     line(c,7,14,9,14); line(c,15,14,17,14); line(c,7,18,9,18); break;
                 case "habit":
-                    c.drawArc(4,4,20,20,-35,285,false,p); line(c,18,3,20,6,16,7);
-                    line(c,8,12,11,15,17,9); break;
+                    // Repeat: a loop that closes clockwise at the top, with a check inside.
+                    arcArrow(c, 12, 12.5f, 7.8f, -35, 295);
+                    line(c,8.6f,12.6f,11,15,15.4f,10.6f); break;
                 case "train":
                     c.drawRoundRect(5,3,19,18,4,4,p); c.drawRoundRect(8,6,16,11,1,1,p);
                     line(c,8,21,10,18); line(c,14,18,16,21); c.drawCircle(8.5f,14.5f,.5f,p); c.drawCircle(15.5f,14.5f,.5f,p); break;
@@ -828,7 +845,8 @@ final class PausaUi {
                     line(c,4,6,20,6); line(c,9,3,15,3); line(c,6,6,7,21,17,21,18,6);
                     line(c,10,10,10,17); line(c,14,10,14,17); break;
                 case "reset":
-                    c.drawArc(4,4,21,21,-80,295,false,p); line(c,3,4,3,10,9,10); break;
+                    // Undo: the same loop turning back, counter-clockwise.
+                    arcArrow(c, 12, 12.5f, 7.8f, 215, -295); break;
                 case "grip":
                     for (int x=9;x<=15;x+=6) for(int y=6;y<=18;y+=6) c.drawCircle(x,y,.6f,p); break;
                 case "chevron": line(c,9,5,16,12,9,19); break;

@@ -82,6 +82,7 @@ describe('api', () => {
       expect.objectContaining({ key: 'focus_note', enabled: false, default: false }),
       expect.objectContaining({ key: 'budget_cloud', enabled: false, default: false }),
       expect.objectContaining({ key: 'health_connect', enabled: false, default: false }),
+      expect.objectContaining({ key: 'notification_panel', enabled: false, default: false }),
     ]);
 
     const on = (await (await json('/api/features/review_zoom', token, { method: 'PUT', body: JSON.stringify({ enabled: true }) })).json()) as any;

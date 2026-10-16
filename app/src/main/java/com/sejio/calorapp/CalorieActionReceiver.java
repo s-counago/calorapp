@@ -15,6 +15,8 @@ public class CalorieActionReceiver extends BroadcastReceiver {
             int delta = intent.getIntExtra(NotificationHelper.EXTRA_DELTA, 0);
             CalorieStore.adjustCigaretteCount(context, delta);
             NotificationHelper.show(context);
+        } else if (NotificationHelper.ACTION_REFRESH.equals(intent.getAction())) {
+            NotificationHelper.show(context);
         } else if (NotificationHelper.ACTION_PROTEIN_ADD.equals(intent.getAction())) {
             int grams = intent.getIntExtra(NotificationHelper.EXTRA_GRAMS, 0);
             CalorieStore.addProtein(context, grams);

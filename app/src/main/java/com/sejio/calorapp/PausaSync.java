@@ -146,6 +146,8 @@ final class PausaSync {
 
         /** Tells open screens that the sync state changed; `applied` > 0 means data changed too. */
         private static void changed(Context context, int applied) {
+            // Counters added on the web or by an agent show up in the notification too.
+            if (applied > 0) NotificationHelper.show(context);
             context.sendBroadcast(new Intent(ACTION_CHANGED).setPackage(context.getPackageName()).putExtra("applied", applied));
         }
 

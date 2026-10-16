@@ -1051,6 +1051,12 @@ export const FEATURES = [
     description: 'Sueño, pasos, ejercicio y pulso en reposo del Pixel Watch, leídos de Health Connect y mostrados en Hoy.',
     default: false,
   },
+  {
+    key: 'notification_panel',
+    title: 'Panel en la notificación',
+    description: 'La notificación fija pasa a ser un solo panel con calorías, proteína y cigarros, botones cortos (+100 y +200 kcal, +5 y +10 g, −1 y +1) y un fondo que cambia con la luz del día. Solo cambia el móvil.',
+    default: false,
+  },
 ] as const;
 export type FeatureKey = (typeof FEATURES)[number]['key'];
 

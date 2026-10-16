@@ -12,5 +12,7 @@ public final class DailyTaskResetReceiver extends BroadcastReceiver {
         refreshIntent.setPackage(context.getPackageName());
         context.sendBroadcast(refreshIntent);
         TaskResetScheduler.scheduleNext(context);
+        // Also runs after a reboot: bring the counter notification back.
+        NotificationHelper.show(context);
     }
 }
