@@ -26,20 +26,14 @@ final class DayPlanStore {
     /**
      * The plan of one day. A task is planned on one day at most: `plan_date`, `plan_slot`
      * (morning, afternoon, evening) and `position` live on the task and sync with the backend.
-     * Timed schedules (TaskScheduleStore, local) also show up in the section of their hour.
+     * A set time (`plan_time`, see TaskScheduleStore) always comes with the slot of its hour.
      */
     static List<List<Long>> read(Context context, String date) {
         LegacyImport.runOnce(context);
         List<List<Long>> result = empty();
-        Set<Long> valid = new HashSet<>();
-        for (TaskStore.Task task : TaskStore.getAll(context)) if (!task.following) valid.add(task.id);
         for (Map<String, Object> row : PausaDb.get(context).rows("SELECT local_id, plan_slot FROM tasks WHERE deleted = 0 "
                 + "AND status != 'cancelled' AND following = 0 AND plan_date = ? ORDER BY position, created_at", date)) {
             result.get(section((String) row.get("plan_slot"))).add((Long) row.get("local_id"));
-        }
-        for (TaskScheduleStore.Schedule schedule : TaskScheduleStore.all(context)) {
-            if (schedule.deleted || !schedule.date().equals(date) || !valid.contains(schedule.taskId)) continue;
-            if (!contains(result, schedule.taskId)) result.get(schedule.minute() < 720 ? 0 : schedule.minute() < 1200 ? 1 : 2).add(schedule.taskId);
         }
         return result;
     }
@@ -68,6 +62,8 @@ final class DayPlanStore {
                 data.put("plan_date", null);
                 data.put("plan_slot", null);
                 data.put("position", null);
+                data.put("plan_time", null);
+                data.put("plan_minutes", null);
                 db.put("tasks", (String) row.get("id"), data, false);
             }
         }
@@ -80,9 +76,13 @@ final class DayPlanStore {
                 Object current = row.get("position");
                 // A task for any time that day (no slot, e.g. made from a habit) shows under the morning and keeps no slot.
                 boolean anyTime = i == 0 && date.equals(row.get("plan_date")) && row.get("plan_slot") == null;
+                // Dragged to another slot of the same day: its set time no longer fits, so it goes.
+                boolean timeOff = row.get("plan_time") != null && date.equals(row.get("plan_date")) && !anyTime
+                        && !SyncSchema.SLOTS[i].equals(row.get("plan_slot"));
                 if (date.equals(row.get("plan_date")) && (anyTime || SyncSchema.SLOTS[i].equals(row.get("plan_slot")))
-                        && current instanceof Number && ((Number) current).doubleValue() == position) continue;
+                        && current instanceof Number && ((Number) current).doubleValue() == position && !timeOff) continue;
                 Map<String, Object> data = new HashMap<>();
+                if (timeOff) { data.put("plan_time", null); data.put("plan_minutes", null); }
                 data.put("plan_date", date);
                 data.put("plan_slot", anyTime ? null : SyncSchema.SLOTS[i]);
                 data.put("position", position);

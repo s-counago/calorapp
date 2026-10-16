@@ -13,9 +13,12 @@ import com.google.android.gms.auth.api.identity.Identity;
 import com.google.android.gms.common.api.Scope;
 import com.google.android.gms.tasks.Tasks;
 import org.json.JSONObject;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -102,39 +105,16 @@ final class CalendarSync {
                 }
                 if (!p.edit().putString("calendar", calendar).putBoolean("creating", false).commit()) throw new IllegalStateException();
             }
-            for (TaskScheduleStore.Schedule row : TaskScheduleStore.all(c)) {
-                if (Thread.currentThread().isInterrupted() || !enabled(c) || !account.equals(p.getString("account", ""))) return false;
-                if (!row.eligible) continue;
-                TaskStore.Task task = TaskStore.find(c, row.taskId);
-                String key = "synced." + row.id;
-                String prior = p.getString(key, "");
-                String remote = p.getString("event." + row.id, row.id);
-                boolean removed = row.deleted || task == null || task.following;
-                if (removed) {
-                    if (prior.equals("deleted")) continue;
-                    api.delete(calendar, remote);
-                    if (!p.edit().putString(key, "deleted").commit()) throw new IllegalStateException();
-                    continue;
-                }
-                if (prior.equals("deleted")) {
-                    remote = UUID.randomUUID().toString().replace("-", "");
-                    if (!p.edit().putString("event." + row.id, remote).putString(key, "").commit()) throw new IllegalStateException();
-                }
-                JSONObject body = CalendarEvent.body(remote, task.text, row.start, row.minutes, row.zone);
-                String fingerprint = ByteString.encodeUtf8(body.toString()).sha256().hex();
-                if (fingerprint.equals(prior)) continue;
-                if (!p.edit().putBoolean("attempted." + row.id, true).commit()) throw new IllegalStateException();
-                api.upsert(calendar, body);
-                if (!p.edit().putString(key, fingerprint).commit()) throw new IllegalStateException();
-            }
-            // Tasks made from a habit (feature habit_tasks) go in as all-day events on their day.
-            for (Map<String, Object> row : PausaDb.get(c).rows("SELECT id, title, plan_date, status, deleted FROM tasks WHERE habit_id IS NOT NULL")) {
+            if (!syncTimedTasks(c, api, calendar, account)) return false;
+            // Tasks made from a habit (feature habit_tasks) go in as all-day events on their day, unless they have a time.
+            for (Map<String, Object> row : PausaDb.get(c).rows("SELECT id, title, plan_date, plan_time, status, deleted FROM tasks WHERE habit_id IS NOT NULL")) {
                 if (Thread.currentThread().isInterrupted() || !enabled(c) || !account.equals(p.getString("account", ""))) return false;
                 String uid = (String) row.get("id");
                 String key = "synced.task." + uid;
                 String prior = p.getString(key, "");
                 String remote = p.getString("event.task." + uid, CalendarEvent.idFor(uid));
-                boolean removed = Long.valueOf(1).equals(row.get("deleted")) || row.get("plan_date") == null || "cancelled".equals(row.get("status"));
+                boolean removed = Long.valueOf(1).equals(row.get("deleted")) || row.get("plan_date") == null || "cancelled".equals(row.get("status"))
+                        || row.get("plan_time") != null; // With a set time it goes in as a timed event instead.
                 if (removed) {
                     if (prior.equals("deleted") || prior.isEmpty()) {
                         if (prior.isEmpty() && !p.edit().putString(key, "deleted").commit()) throw new IllegalStateException();
@@ -168,6 +148,66 @@ final class CalendarSync {
             }
             throw failure;
         }
+    }
+
+    /**
+     * Tasks with a set time (plan_time) go in as timed events. Each one is keyed by its task id, so a
+     * time set on the web or by an agent reaches Calendar too. The old local blocks that were moved
+     * onto their tasks keep their event; the ones from today on that could not move are deleted.
+     */
+    private static boolean syncTimedTasks(Context c, CalendarApi api, String calendar, String account) throws Exception {
+        SharedPreferences p = prefs(c);
+        List<TaskScheduleStore.Schedule> timed = TaskScheduleStore.all(c);
+        Map<String, String> moved = TaskScheduleStore.movedBlocks(c);
+        if (!p.getBoolean("blocks_moved", false)) {
+            SharedPreferences.Editor editor = p.edit();
+            for (Map.Entry<String, String> block : moved.entrySet()) {
+                String prior = p.getString("synced." + block.getKey(), "");
+                if (prior.isEmpty() || prior.equals("deleted")) continue;
+                editor.putString("event.time." + block.getValue(), p.getString("event." + block.getKey(), block.getKey()))
+                        .putString("synced.time." + block.getValue(), prior);
+            }
+            if (!editor.putBoolean("blocks_moved", true).commit()) throw new IllegalStateException();
+        }
+        long today = TaskScheduleStore.start(DayPlanStore.day(0), 0);
+        for (TaskScheduleStore.LegacyBlock block : TaskScheduleStore.legacyBlocks(c)) {
+            if (moved.containsKey(block.id)) continue;
+            String key = "synced." + block.id;
+            String prior = p.getString(key, "");
+            if (prior.isEmpty() || prior.equals("deleted") || (!block.deleted && block.start < today)) continue;
+            if (Thread.currentThread().isInterrupted() || !enabled(c) || !account.equals(p.getString("account", ""))) return false;
+            api.delete(calendar, p.getString("event." + block.id, block.id));
+            if (!p.edit().putString(key, "deleted").commit()) throw new IllegalStateException();
+        }
+        Set<String> live = new HashSet<>();
+        for (TaskScheduleStore.Schedule row : timed) {
+            if (Thread.currentThread().isInterrupted() || !enabled(c) || !account.equals(p.getString("account", ""))) return false;
+            TaskStore.Task task = TaskStore.find(c, row.taskId);
+            if (task == null || task.following) continue;
+            live.add(row.id);
+            String key = "synced.time." + row.id;
+            String prior = p.getString(key, "");
+            String remote = p.getString("event.time." + row.id, CalendarEvent.idFor(row.id + "@time"));
+            if (prior.equals("deleted")) {
+                remote = UUID.randomUUID().toString().replace("-", "");
+                if (!p.edit().putString("event.time." + row.id, remote).putString(key, "").commit()) throw new IllegalStateException();
+            }
+            JSONObject body = CalendarEvent.body(remote, task.text, row.start, row.minutes, row.zone);
+            String fingerprint = ByteString.encodeUtf8(body.toString()).sha256().hex();
+            if (fingerprint.equals(p.getString(key, ""))) continue;
+            api.upsert(calendar, body);
+            if (!p.edit().putString(key, fingerprint).commit()) throw new IllegalStateException();
+        }
+        // Times taken off, tasks deleted or moved to Esperando: their event goes.
+        for (String key : new ArrayList<>(p.getAll().keySet())) {
+            if (!key.startsWith("synced.time.")) continue;
+            String uid = key.substring("synced.time.".length());
+            if (live.contains(uid) || "deleted".equals(p.getString(key, ""))) continue;
+            if (Thread.currentThread().isInterrupted() || !enabled(c) || !account.equals(p.getString("account", ""))) return false;
+            api.delete(calendar, p.getString("event.time." + uid, CalendarEvent.idFor(uid + "@time")));
+            if (!p.edit().putString(key, "deleted").commit()) throw new IllegalStateException();
+        }
+        return true;
     }
 
     static boolean hasScopes(AuthorizationResult result) {
