@@ -38,6 +38,9 @@ public final class FeedbackSmokeTest extends Instrumentation {
             TaskSheets.applyPlan(c, task, plan);
             TaskScheduleStore.Schedule initial = TaskScheduleStore.first(c, task, DayPlanStore.day(0));
             check(initial != null && initial.eligible && initial.minute() == 555 && initial.minutes == 45, "exact time persisted");
+            java.util.Map<String, Object> synced = PausaDb.get(c).row("tasks", TaskStore.uid(c, task));
+            check(Long.valueOf(555).equals(synced.get("plan_time")) && Long.valueOf(45).equals(synced.get("plan_minutes"))
+                    && "morning".equals(synced.get("plan_slot")), "time synced as plan_time and plan_minutes");
             plan = TaskSheets.planOf(c, task); plan.day = 1; plan.minute = 16 * 60 + 10;
             TaskSheets.applyPlan(c, task, plan);
             TaskScheduleStore.Schedule moved = TaskScheduleStore.first(c, task, DayPlanStore.day(1));

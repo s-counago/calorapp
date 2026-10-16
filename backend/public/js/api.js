@@ -1,7 +1,7 @@
 // Every call to the backend goes through here: it sends an X-Request-Id, logs failures with
 // the server's request id and reports web errors to /api/logs so they show up in get_client_logs.
 
-export const WEB_VERSION = 'web-1.0.0';
+export const WEB_VERSION = 'web-1.1.0';
 
 export class ApiError extends Error {
   constructor(message, { status, code, requestId } = {}) {

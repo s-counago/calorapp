@@ -80,13 +80,14 @@ Para conectarlo en Claude: Ajustes → Conectores → Añadir conector personali
 `public/` es una app de una sola página en JavaScript sin dependencias ni paso de compilación (`index.html`, `styles.css`, `js/app.js` y una vista por archivo en `js/views/`). Solo entra con la sesión de Google y usa la misma API REST que el móvil, así que lo que cambies allí llega al teléfono en su siguiente sincronización.
 
 - **Hoy:** la nota de estos días (`focus_note`, clic para editarla); contadores con los botones rápidos del móvil, corregir el total, poner a cero y cambiar el objetivo; plan del día por franjas (arrastrar entre franjas, «Añadir de tu lista»); hábitos del día; salud; lo de mañana; entradas del día. Se puede abrir cualquier día para corregirlo.
+- **Planificar** (con `pausa_v7`, como la pestaña del móvil): la tira de la semana arriba y los carriles debajo, con lo que quedó atrás primero y el cajón encima de la Bandeja. Se arrastra una tarea a un día para planificarla o a un carril para moverla. Con `pausa_v7` el menú tiene las cuatro pestañas del móvil (Hoy, Planificar, Hábitos y Dinero) y el resto va en «Más»; las vistas antiguas siguen en su dirección.
 - **Semana:** los siete días con sus franjas, lo que quedó atrás, tu lista y Prioridad a un lado; se planifica arrastrando.
 - **Bandeja, Carriles y Esperando:** como en el móvil. Carriles sale solo con `task_kanban`.
 - **Cajón** (`captures`): apuntar enlaces e ideas, aceptar la sugerencia de un agente, convertir en tarea, guardar en la biblioteca con etiquetas, archivar o borrar. Se ordena con el teclado: J/K, Enter acepta la sugerencia, T, G, A y 1–6 manda a un carril.
 - **Hábitos:** puntos, racha y gráfica de 10 a 104 semanas, corregir cualquier semana pasada, crear, editar, archivar y borrar.
 - **Resumen** (`review_zoom`) y **Salud** (`health_connect`).
 - **Ajustes:** funciones, objetivos, dispositivos con su estado de sincronización y logs de las apps.
-- La caja **Apuntar** (atajo `/`) crea una tarea; `+350` suma calorías, `p30` proteína y `c1` un cigarro.
+- La caja **Apuntar** (atajo `/`) entiende la misma línea que el móvil (`js/quick.js`, probado en `test/quick.test.ts` con los casos de `QuickCaptureTest`): `!` delante para Prioridad, «esperar…» para Esperando, día y franja al final («mañana tarde»), `+350` calorías, `p30` proteína y `c1` un cigarro. Con el cajón encendido, una línea con un enlace va al cajón, y Alt + Enter manda cualquier línea allí.
 
 **Dinero** (`budget_cloud`) enseña el resumen del ciclo que sube el móvil: disponible, topes, fijos y gasto por categoría. Lo que vive solo en el móvil (movimientos y credenciales, Viajes, Google Calendar y rituales) no aparece. Cada petición manda `X-Request-Id` (`web-…`); los fallos se muestran con ese id y se suben a `POST /api/logs` con la etiqueta `web`, así que salen en `get_client_logs`.
 

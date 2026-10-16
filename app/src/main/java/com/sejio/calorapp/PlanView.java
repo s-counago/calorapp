@@ -209,7 +209,7 @@ final class PlanView extends LinearLayout {
             check.setContentDescription("Hecha: " + task.text);
             check.setListener(checked -> { TaskStore.setDone(c, task.id, checked); refresh(); });
             row.addView(check, new LayoutParams(dp(48), dp(48)));
-            TextView text = PausaUi.text(c, task.text, 15, task.done ? PausaUi.MUTED : PausaUi.INK, false);
+            TextView text = PausaUi.text(c, (task.planTime == null ? "" : task.clock() + " · ") + task.text, 15, task.done ? PausaUi.MUTED : PausaUi.INK, false);
             text.setMaxLines(3);
             row.addView(text, new LayoutParams(0, -2, 1));
             row.addView(PausaUi.iconButton(c, "close", "Quitar de este día: " + task.text, PausaUi.MUTED, () -> {
@@ -337,7 +337,8 @@ final class PlanView extends LinearLayout {
     }
 
     private static String detail(TaskStore.Task task) {
-        String when = Planning.describe(task.planDate, task.planSlot);
+        String when = task.planTime == null ? Planning.describe(task.planDate, task.planSlot)
+                : Planning.dayName(task.planDate) + " · " + task.clock() + (task.planMinutes != null ? " · " + task.planMinutes + " min" : "");
         if (task.following && !task.waitingFor.isEmpty()) return "Esperando a " + task.waitingFor + (when.isEmpty() ? "" : " · " + when);
         return when;
     }
@@ -420,10 +421,20 @@ final class PlanView extends LinearLayout {
     private void renderCajon() {
         Context c = getContext();
         List<CaptureStore.Capture> captures = CaptureStore.fresh(c);
+        int sorted = CaptureStore.count(c, "kept") + CaptureStore.count(c, "archived");
+        if (captures.isEmpty() && sorted == 0) return;
+        LinearLayout head = new LinearLayout(c);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(4), 0, 0, dp(4));
+        head.addView(PausaUi.eyebrow(c, captures.isEmpty() ? "Cajón · todo ordenado" : "Cajón · " + captures.size(), PausaUi.MUTED),
+                new LayoutParams(0, -2, 1));
+        if (sorted > 0) {
+            TextView library = PausaUi.quiet(c, "Biblioteca y archivo", PausaUi.GREEN, () -> CaptureLibrarySheet.show(c, this::refresh));
+            library.setContentDescription("Abrir la biblioteca y el archivo del cajón");
+            head.addView(library, new LayoutParams(-2, dp(44)));
+        }
+        list.addView(head, full());
         if (captures.isEmpty()) return;
-        TextView label = PausaUi.eyebrow(c, "Cajón · " + captures.size(), PausaUi.MUTED);
-        label.setPadding(dp(4), 0, 0, dp(8));
-        list.addView(label, full());
         int visible = Math.min(captures.size(), 20);
         for (int i = 0; i < visible; i++) {
             LayoutParams params = full();
@@ -452,7 +463,7 @@ final class PlanView extends LinearLayout {
         text.setLineSpacing(0, 1.12f);
         card.addView(text, full());
         if (capture.url != null) {
-            TextView link = PausaUi.text(c, host(capture.url), 12, PausaUi.SAGE, true);
+            TextView link = PausaUi.text(c, CaptureLibrarySheet.host(capture.url), 12, PausaUi.SAGE, true);
             link.setPadding(0, dp(4), 0, 0);
             link.setContentDescription("Abrir enlace");
             link.setOnClickListener(v -> {
@@ -472,7 +483,7 @@ final class PlanView extends LinearLayout {
         actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         CaptureStore.Suggestion s = capture.suggested();
         if (s != null) actions.addView(PausaUi.quiet(c, "Aceptar", PausaUi.GREEN, () -> accept(capture, s)));
-        actions.addView(PausaUi.quiet(c, "Tarea", PausaUi.GREEN, () -> toTask(capture)));
+        actions.addView(PausaUi.quiet(c, "Tarea", PausaUi.GREEN, () -> CaptureLibrarySheet.toTask(c, capture, this::refresh)));
         actions.addView(PausaUi.quiet(c, "Guardar", PausaUi.GREEN, () -> {
             CaptureStore.keep(c, capture);
             refresh();
@@ -497,44 +508,6 @@ final class PlanView extends LinearLayout {
             CaptureStore.keep(c, capture);
             refresh();
             PausaUi.snack(c, "Guardada en la biblioteca.", "Deshacer", () -> { CaptureStore.reopen(c, capture); refresh(); });
-        }
-    }
-
-    /** Which lane the new task goes to; the title can be edited first. */
-    private void toTask(CaptureStore.Capture capture) {
-        Context c = getContext();
-        PausaUi.Sheet sheet = new PausaUi.Sheet(c, "Convertir en tarea");
-        EditText title = new EditText(c);
-        PausaUi.input(title);
-        title.setText(capture.title != null ? capture.title : capture.text);
-        title.setSelection(title.length());
-        title.setMaxLines(4);
-        title.setContentDescription("Título de la tarea");
-        sheet.add(title, 14);
-        sheet.add(PausaUi.eyebrow(c, "A qué carril", PausaUi.MUTED), 8);
-        LinearLayout lanes = new LinearLayout(c);
-        for (int i = 0; i < TaskStore.LANES.length; i++) {
-            final String to = TaskStore.LANES[i];
-            lanes.addView(choice(c, TaskStore.LANE_LABELS[i], false, () -> {
-                String value = title.getText().toString().trim();
-                if (value.isEmpty()) { title.setError("Escribe un título"); return; }
-                sheet.dismiss();
-                CaptureStore.toTask(c, capture, value, to, null);
-                refresh();
-                PausaUi.snack(c, "Ahora es una tarea de " + TaskStore.laneLabel(to).toLowerCase(PausaUi.SPANISH) + ".", null, null);
-            }));
-        }
-        sheet.add(scrolling(lanes), 8);
-        sheet.footer(null, PausaUi.quiet(c, "Cancelar", PausaUi.MUTED, sheet::dismiss));
-        sheet.show();
-    }
-
-    private static String host(String url) {
-        try {
-            String host = android.net.Uri.parse(url).getHost();
-            return host == null ? url : host.startsWith("www.") ? host.substring(4) : host;
-        } catch (RuntimeException invalid) {
-            return url;
         }
     }
 

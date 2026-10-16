@@ -34,10 +34,13 @@ final class TaskStore {
     }
 
     static Task fromRow(Map<String, Object> row) {
-        return new Task((Long) row.get("local_id"), (String) row.get("title"), "done".equals(row.get("status")),
+        Task task = new Task((Long) row.get("local_id"), (String) row.get("title"), "done".equals(row.get("status")),
                 Long.valueOf(1).equals(row.get("following")), text(row.get("waiting_for")),
                 text(row.get("expected_date")), text(row.get("review_date")), (String) row.get("board"), (String) row.get("habit_id"),
                 (String) row.get("plan_date"), (String) row.get("plan_slot"));
+        task.planTime = row.get("plan_time") instanceof Number ? ((Number) row.get("plan_time")).intValue() : null;
+        task.planMinutes = row.get("plan_minutes") instanceof Number ? ((Number) row.get("plan_minutes")).intValue() : null;
+        return task;
     }
 
     /**
@@ -410,6 +413,13 @@ final class TaskStore {
         final String habitId;
         /** Its cita: the planned day (YYYY-MM-DD) and slot, or null. */
         final String planDate, planSlot;
+        /** Its set time on planDate (minutes after midnight) and duration in minutes, or null. Read from the row. */
+        Integer planTime, planMinutes;
+
+        /** «18:30», or "" without a set time. */
+        String clock() {
+            return planTime == null ? "" : String.format(Locale.ROOT, "%02d:%02d", planTime / 60, planTime % 60);
+        }
 
         Task(long id, String text, boolean done) {
             this(id, text, done, false, "", "", "", null);

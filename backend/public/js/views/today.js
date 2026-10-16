@@ -15,12 +15,13 @@ const KINDS = {
 
 export async function renderToday(root, day) {
   day ??= state.today;
-  const [summary, entries, tomorrow, overview, note] = await Promise.all([
+  const [summary, entries, tomorrow, overview, note, drawer] = await Promise.all([
     Pausa.day(day),
     Pausa.entries(day),
     day === state.today ? Pausa.tasks({ plan_date: addDays(day, 1), status: 'todo' }) : Promise.resolve(null),
     day === state.today ? Pausa.overview(day) : Promise.resolve(null),
     isOn('focus_note') ? Pausa.note() : Promise.resolve(null),
+    day === state.today && isOn('pausa_v7') && isOn('captures') ? Pausa.captures({ status: 'new', limit: 1 }) : Promise.resolve(null),
   ]);
   const isToday = day === state.today;
   fill(root, 
@@ -37,6 +38,7 @@ export async function renderToday(root, day) {
       ),
     ),
     isOn('focus_note') ? noteLine(note) : null,
+    drawer?.waiting ? h('a.focus-cajon', { href: '#/cajon' }, `Cajón · ${drawer.waiting} ${drawer.waiting === 1 ? 'cosa sin ordenar' : 'cosas sin ordenar'}`) : null,
     !isToday && day < state.today ? h('p.notice', 'Estás corrigiendo un día pasado: lo que apuntes se guarda en ese día.') : null,
     h('div.today-grid',
       h('section.column', h('h2.section-title', 'Contadores'), Object.keys(KINDS).map((kind) => counterCard(kind, summary.counters[kind], day, entries))),
@@ -181,7 +183,7 @@ function planBlock(plan, day, isToday) {
   });
   return h('div',
     h('div.section-row', h('h2.section-title', 'Tu día'), all.length ? h('span.muted', `${done} de ${all.length} hechas`) : null, h('span.spacer'), h('button.pill', { onclick: () => pickFromList(day) }, 'Añadir de tu lista')),
-    all.length ? null : empty('Tu día está en blanco.', 'Añade algo pequeño para empezar, o arrastra tareas desde Semana.'),
+    all.length ? null : empty('Tu día está en blanco.', `Añade algo pequeño para empezar, o arrastra tareas desde ${isOn('pausa_v7') ? 'Planificar' : 'Semana'}.`),
     sections,
   );
 }
