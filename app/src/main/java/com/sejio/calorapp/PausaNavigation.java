@@ -15,13 +15,20 @@ import android.widget.TextView;
 
 /**
  * Floating bottom navigation. A cream pill of light glides behind the selected destination.
- * Sections: 0 Hoy (diario), 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero, 8 Kanban.
+ * Sections: 0 Hoy (diario), 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero, 8 Kanban,
+ * 9 Planificar (pausa_v7).
  */
 final class PausaNavigation extends LinearLayout {
     interface Listener { void select(int section); }
     static final String[] LABELS = {"Hoy", "Tareas", "Hábitos", "Viajes", "Dinero"};
     private static final String[] SYMBOLS = {"sunrise", "list", "habit", "train", "wallet"};
-    private final TextView[] tabs = new TextView[5];
+    /** With pausa_v7: four destinations, Viajes moves to Ajustes and Planificar (section 9) replaces Tareas. */
+    static final String[] LABELS_V7 = {"Hoy", "Planificar", "Hábitos", "Dinero"};
+    private static final String[] SYMBOLS_V7 = {"sunrise", "calendar", "habit", "wallet"};
+    private final Listener listener;
+    private TextView[] tabs = new TextView[0];
+    private String[] symbols = SYMBOLS;
+    private boolean v7;
     private final Paint indicator = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
     private float left = -1, right = -1;
@@ -29,8 +36,9 @@ final class PausaNavigation extends LinearLayout {
     private int taskSection = 2;
     private ValueAnimator animator;
 
-    PausaNavigation(Context context, Listener listener) {
+    PausaNavigation(Context context, Listener listener, boolean v7) {
         super(context);
+        this.listener = listener;
         setOrientation(HORIZONTAL);
         setWillNotDraw(false);
         int sidePadding = dp(getResources().getConfiguration().screenWidthDp < 380 ? 2 : 6);
@@ -38,20 +46,32 @@ final class PausaNavigation extends LinearLayout {
         setBackground(PausaUi.surface(context, PausaUi.NIGHT, 34));
         setElevation(dp(10));
         indicator.setColor(PausaUi.CREAM);
+        build(v7);
+    }
+
+    /** Rebuilds the tabs when pausa_v7 is switched on or off. */
+    void build(boolean v7) {
+        if (tabs.length > 0 && this.v7 == v7) return;
+        this.v7 = v7;
+        Context context = getContext();
+        removeAllViews();
+        String[] labels = v7 ? LABELS_V7 : LABELS;
+        symbols = v7 ? SYMBOLS_V7 : SYMBOLS;
+        tabs = new TextView[labels.length];
         for (int index = 0; index < tabs.length; index++) {
             final int position = index;
-            TextView tab = PausaUi.text(context, LABELS[index], 11, PausaUi.ON_NIGHT_MUTED, true);
+            TextView tab = PausaUi.text(context, labels[index], 11, PausaUi.ON_NIGHT_MUTED, true);
             PausaUi.capped(tab, 11, 1f);
             tab.setSingleLine(true);
             tab.setGravity(Gravity.CENTER);
             tab.setMinHeight(dp(52));
             tab.setPadding(0, dp(6), 0, dp(6));
             tab.setCompoundDrawablePadding(dp(3));
-            tab.setContentDescription(LABELS[index]);
+            tab.setContentDescription(labels[index]);
             tab.setBackground(PausaUi.ripple(context, android.graphics.Color.TRANSPARENT, 28));
             tab.setOnClickListener(view -> {
                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                listener.select(position == 0 ? 0 : position == 1 ? taskSection : position == 2 ? 3 : position == 3 ? 1 : 7);
+                listener.select(sectionFor(position));
             });
             tab.setAccessibilityDelegate(new AccessibilityDelegate() {
                 @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
@@ -63,10 +83,17 @@ final class PausaNavigation extends LinearLayout {
             tabs[index] = tab;
             addView(tab, new LayoutParams(0, -1, 1));
         }
-        select(0, false);
+        selected = -1;
+        left = -1;
     }
 
-    static int tabFor(int section) {
+    private int sectionFor(int position) {
+        if (v7) return position == 0 ? 0 : position == 1 ? 9 : position == 2 ? 3 : 7;
+        return position == 0 ? 0 : position == 1 ? taskSection : position == 2 ? 3 : position == 3 ? 1 : 7;
+    }
+
+    int tabFor(int section) {
+        if (v7) return section == 7 ? 3 : section == 3 ? 2 : section == 0 || section == 1 ? 0 : 1;
         return section == 7 ? 4 : section == 1 ? 3 : section == 3 ? 2 : section == 0 ? 0 : 1;
     }
 
@@ -75,6 +102,7 @@ final class PausaNavigation extends LinearLayout {
     void select(int section, boolean animate) {
         int index = tabFor(section);
         if (section == 2 || (section >= 4 && section <= 6) || section == 8) taskSection = section;
+        if (index >= tabs.length) return;
         boolean changed = index != selected;
         selected = index;
         for (int i = 0; i < tabs.length; i++) {
@@ -82,7 +110,7 @@ final class PausaNavigation extends LinearLayout {
             int color = active ? PausaUi.NIGHT : PausaUi.ON_NIGHT_MUTED;
             tabs[i].setSelected(active);
             tabs[i].setTextColor(color);
-            tabs[i].setCompoundDrawables(null, new PausaUi.Symbol(getContext(), SYMBOLS[i], color, 22), null, null);
+            tabs[i].setCompoundDrawables(null, new PausaUi.Symbol(getContext(), symbols[i], color, 22), null, null);
         }
         if (changed && animate) PausaUi.pop(tabs[index]);
         glideTo(index, animate && changed);

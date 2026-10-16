@@ -22,7 +22,7 @@ import java.util.UUID;
  */
 final class PausaDb extends SQLiteOpenHelper {
     static final String NAME = "pausa.db";
-    private static final int VERSION = 5;
+    private static final int VERSION = 6;
     private static PausaDb instance;
 
     private final Context context;
@@ -57,6 +57,7 @@ final class PausaDb extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE settings (id TEXT PRIMARY KEY, value TEXT NOT NULL, " + sync + ")");
         createHealthDays(db);
         createBudgetCycles(db);
+        createCaptures(db);
         // Local only: habit points are derived on the phone from the checks (see HabitStore).
         db.execSQL("CREATE TABLE habit_scores (habit_id TEXT PRIMARY KEY, json TEXT NOT NULL)");
         // One entry per record with unsent changes. `rev` grows on every edit, so a record edited
@@ -82,6 +83,15 @@ final class PausaDb extends SQLiteOpenHelper {
             db.execSQL("ALTER TABLE tasks ADD COLUMN habit_id TEXT");
         }
         if (oldVersion < 5) createBudgetCycles(db);
+        if (oldVersion < 6) createCaptures(db);
+    }
+
+    /** El cajón, see backend migration 0008 and CaptureStore. */
+    private static void createCaptures(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS captures (id TEXT PRIMARY KEY, text TEXT NOT NULL, url TEXT, title TEXT, source TEXT, "
+                + "status TEXT NOT NULL DEFAULT 'new', kind TEXT, tags TEXT, task_id TEXT, suggestion TEXT, created_at INTEGER NOT NULL, "
+                + "updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS captures_status ON captures (status, created_at)");
     }
 
     /** Money summary per payday cycle, see backend migration 0009 and BudgetCloud. */

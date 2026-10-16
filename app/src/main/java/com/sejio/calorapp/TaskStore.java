@@ -36,7 +36,8 @@ final class TaskStore {
     static Task fromRow(Map<String, Object> row) {
         return new Task((Long) row.get("local_id"), (String) row.get("title"), "done".equals(row.get("status")),
                 Long.valueOf(1).equals(row.get("following")), text(row.get("waiting_for")),
-                text(row.get("expected_date")), text(row.get("review_date")), (String) row.get("board"), (String) row.get("habit_id"));
+                text(row.get("expected_date")), text(row.get("review_date")), (String) row.get("board"), (String) row.get("habit_id"),
+                (String) row.get("plan_date"), (String) row.get("plan_slot"));
     }
 
     /**
@@ -236,6 +237,108 @@ final class TaskStore {
         update(context, id, data);
     }
 
+    // ------------------------------------------------------------------ Lanes (pausa_v7)
+
+    /**
+     * Each task is in exactly one lane, derived from `board` and `following` as laneOf does in the
+     * backend: waiting when following, the board column when there is one, otherwise the inbox.
+     */
+    static final String[] LANES = {"inbox", "priority", "stack", "waiting", "vault", "failed"};
+    static final String[] LANE_LABELS = {"Bandeja", "Prioridad", "Stack", "Esperando", "Baúl", "Fracasos"};
+
+    private static final String LANE_SQL = "CASE WHEN following = 1 THEN 'waiting' "
+            + "WHEN board IN ('stack', 'priority', 'vault', 'failed') THEN board ELSE 'inbox' END";
+
+    static String laneLabel(String lane) {
+        for (int i = 0; i < LANES.length; i++) if (LANES[i].equals(lane)) return LANE_LABELS[i];
+        return LANE_LABELS[0];
+    }
+
+    /** Open tasks of one lane, newest first. */
+    static List<Task> lane(Context context, String lane) {
+        LegacyImport.runOnce(context);
+        List<Task> tasks = new ArrayList<>();
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND "
+                + LANE_SQL + " = ? ORDER BY created_at DESC, local_id DESC", lane)) {
+            tasks.add(fromRow(row));
+        }
+        return tasks;
+    }
+
+    static Map<String, Integer> laneCounts(Context context) {
+        LegacyImport.runOnce(context);
+        Map<String, Integer> counts = new HashMap<>();
+        for (String lane : LANES) counts.put(lane, 0);
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT " + LANE_SQL + " AS lane, COUNT(*) AS n FROM tasks "
+                + "WHERE deleted = 0 AND status = 'todo' GROUP BY lane")) {
+            counts.put((String) row.get("lane"), ((Long) row.get("n")).intValue());
+        }
+        return counts;
+    }
+
+    /** Moves a task to a lane; its cita stays as it was. */
+    static void setLane(Context context, long id, String lane) {
+        Map<String, Object> data = new HashMap<>();
+        boolean column = false;
+        for (String board : BOARD) column |= board.equals(lane);
+        data.put("board", column ? lane : null);
+        data.put("following", "waiting".equals(lane) ? 1 : 0);
+        update(context, id, data);
+    }
+
+    /**
+     * Plans a task on `day` (YYYY-MM-DD) in a slot (morning, afternoon, evening) or, with a null slot,
+     * at any time that day; a null day takes it off the plan. It goes last in its slot, and a timed
+     * block left on the day it leaves is removed.
+     */
+    static void plan(Context context, long id, String day, String slot) {
+        LegacyImport.runOnce(context);
+        PausaDb db = PausaDb.get(context);
+        for (Map<String, Object> row : db.rows("SELECT id, plan_date FROM tasks WHERE local_id = ?", String.valueOf(id))) {
+            String old = (String) row.get("plan_date");
+            if (old != null && !old.equals(day)) TaskScheduleStore.removeDay(context, id, old);
+            Map<String, Object> data = new HashMap<>();
+            data.put("plan_date", day);
+            data.put("plan_slot", day == null ? null : slot);
+            double position = 0;
+            if (day != null) {
+                for (Map<String, Object> max : db.rows("SELECT MAX(position) AS max FROM tasks WHERE deleted = 0 AND plan_date = ?", day)) {
+                    if (max.get("max") instanceof Number) position = ((Number) max.get("max")).doubleValue();
+                }
+            }
+            data.put("position", day == null ? null : position + 1);
+            if (day == null) { data.put("plan_time", null); data.put("plan_minutes", null); }
+            db.put("tasks", (String) row.get("id"), data, false);
+            changed(context);
+        }
+    }
+
+    /** Open tasks planned on a day before today: what was left behind. Most recent first. */
+    static List<Task> leftOver(Context context) {
+        LegacyImport.runOnce(context);
+        List<Task> tasks = new ArrayList<>();
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' "
+                + "AND plan_date IS NOT NULL AND plan_date < ? ORDER BY plan_date DESC, position LIMIT 100", DayPlanStore.day(0))) {
+            tasks.add(fromRow(row));
+        }
+        return tasks;
+    }
+
+    /** Open tasks planned on one day. */
+    static List<Task> plannedOn(Context context, String day) {
+        LegacyImport.runOnce(context);
+        List<Task> tasks = new ArrayList<>();
+        for (Map<String, Object> row : PausaDb.get(context).rows("SELECT * FROM tasks WHERE deleted = 0 AND status != 'cancelled' "
+                + "AND plan_date = ? ORDER BY CASE plan_slot WHEN 'morning' THEN 1 WHEN 'afternoon' THEN 2 WHEN 'evening' THEN 3 ELSE 0 END, position", day)) {
+            tasks.add(fromRow(row));
+        }
+        return tasks;
+    }
+
+    static int openOn(Context context, String day) {
+        return PausaDb.get(context).count("SELECT COUNT(*) FROM tasks WHERE deleted = 0 AND status = 'todo' AND plan_date = ?", day);
+    }
+
     private static void changed(Context context) {
         CalendarSync.request(context);
     }
@@ -305,6 +408,8 @@ final class TaskStore {
         final String board;
         /** Backend id of the habit this task was made from, or null. */
         final String habitId;
+        /** Its cita: the planned day (YYYY-MM-DD) and slot, or null. */
+        final String planDate, planSlot;
 
         Task(long id, String text, boolean done) {
             this(id, text, done, false, "", "", "", null);
@@ -320,6 +425,13 @@ final class TaskStore {
 
         Task(long id, String text, boolean done, boolean following, String waitingFor, String expectedDate, String reviewDate, String board,
                 String habitId) {
+            this(id, text, done, following, waitingFor, expectedDate, reviewDate, board, habitId, null, null);
+        }
+
+        Task(long id, String text, boolean done, boolean following, String waitingFor, String expectedDate, String reviewDate, String board,
+                String habitId, String planDate, String planSlot) {
+            this.planDate = planDate;
+            this.planSlot = planSlot;
             this.board = board;
             this.habitId = habitId;
             this.id = id;
@@ -331,8 +443,14 @@ final class TaskStore {
             this.reviewDate = reviewDate;
         }
 
+        String lane() {
+            if (following) return "waiting";
+            for (String column : BOARD) if (column.equals(board)) return column;
+            return "inbox";
+        }
+
         Task copy(String text, boolean done) {
-            return new Task(id, text, done, following, waitingFor, expectedDate, reviewDate, board, habitId);
+            return new Task(id, text, done, following, waitingFor, expectedDate, reviewDate, board, habitId, planDate, planSlot);
         }
     }
 }

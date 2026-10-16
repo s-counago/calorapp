@@ -74,6 +74,7 @@ describe('api', () => {
     const token = await deviceToken();
     const list = async () => ((await (await json('/api/features', token)).json()) as any).items;
     expect(await list()).toEqual([
+      expect.objectContaining({ key: 'pausa_v7', enabled: false, default: false }),
       expect.objectContaining({ key: 'review_zoom', enabled: false, default: false }),
       expect.objectContaining({ key: 'task_kanban', enabled: false, default: false }),
       expect.objectContaining({ key: 'habit_tasks', enabled: false, default: false }),
