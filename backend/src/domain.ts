@@ -1004,6 +1004,12 @@ export async function setFocusNote(db: D1Database, text: unknown, until: unknown
  */
 export const FEATURES = [
   {
+    key: 'pausa_v7',
+    title: 'Pausa 7: Planificar',
+    description: 'Cuatro pestañas (Hoy, Planificar, Hábitos, Dinero). Planificar junta los carriles (Bandeja, Prioridad, Stack, Esperando, Baúl, Fracasos) con la semana, Hoy enseña lo que quedó atrás y el botón + apunta con una sola línea. Viajes pasa a Ajustes.',
+    default: false,
+  },
+  {
     key: 'review_zoom',
     title: 'Resumen Día · Semana · Mes',
     description: 'Un selector encima de Hoy para alejarte del día y ver la semana o el mes: salud, hábitos, tareas y dinero.',
