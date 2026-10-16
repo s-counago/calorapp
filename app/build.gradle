@@ -10,8 +10,8 @@ android {
         applicationId "com.sejio.calorapp"
         minSdk 23
         targetSdk 35
-        versionCode 41
-        versionName "6.20.0"
+        versionCode 42
+        versionName "6.21.0"
         testInstrumentationRunner project.findProperty("uiTestRunner") ?: "com.sejio.calorapp.PlannerSmokeTest"
         // Pausa backend and the Google OAuth web client used as serverClientId. Neither is secret.
         buildConfigField "String", "PAUSA_API_URL", "\"${project.findProperty("pausaApiUrl") ?: "https://pausa.s-counago00.workers.dev"}\""

@@ -1057,6 +1057,12 @@ export const FEATURES = [
     description: 'La notificación fija pasa a ser un solo panel con calorías, proteína y cigarros, botones cortos (+100 y +200 kcal, +5 y +10 g, −1 y +1) y un fondo que cambia con la luz del día. Solo cambia el móvil.',
     default: false,
   },
+  {
+    key: 'dated_last',
+    title: 'Con fecha, al fondo',
+    description: 'En el tablero y en los carriles, las tareas sin fecha quedan arriba y las que tienen día (o vencimiento) bajan al fondo, de la más próxima a la más lejana.',
+    default: false,
+  },
 ] as const;
 export type FeatureKey = (typeof FEATURES)[number]['key'];
 

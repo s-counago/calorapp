@@ -4,7 +4,7 @@
 
 import { Pausa } from '../api.js';
 import { state, isOn } from '../state.js';
-import { byPlan, dropTarget, isOpen, laneOf, moveTo, planOn, quickAdd, taskRow } from '../tasks.js';
+import { byLane, byPlan, dropTarget, isOpen, laneOf, moveTo, planOn, quickAdd, taskRow } from '../tasks.js';
 import { LANE_LABELS, addDays, askNumber, attempt, clock, dayMonth, empty, fill, h, relativeDay, toast, weekStart } from '../ui.js';
 
 const PAGE = 60;
@@ -113,7 +113,7 @@ function lanes(counts, tasks, drawer) {
   };
   const sorted = tasks.slice().sort((a, b) => lane === 'waiting'
     ? (a.review_date ?? a.expected_date ?? '9999').localeCompare(b.review_date ?? b.expected_date ?? '9999')
-    : b.created_at - a.created_at);
+    : byLane(a, b));
   const query = filter.toLowerCase();
   const matching = query ? sorted.filter((task) => task.title.toLowerCase().includes(query) || (task.notes ?? '').toLowerCase().includes(query)) : sorted;
   const search = h('input', { type: 'search', placeholder: `Filtrar ${LANE_LABELS[lane].toLowerCase()}`, value: filter, 'aria-label': `Filtrar ${LANE_LABELS[lane]}` });

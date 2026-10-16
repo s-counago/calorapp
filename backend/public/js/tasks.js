@@ -2,7 +2,8 @@
 // the editor and the quick-add form.
 
 import { Pausa } from './api.js';
-import { state } from './state.js';
+import { laneOrder } from './order.js';
+import { isOn, state } from './state.js';
 import { LANE_LABELS, SLOT_LABELS, addDays, attempt, clock, confirmDialog, dateTime, dayMonth, dialog, h, relativeDay, toast } from './ui.js';
 
 export const isOpen = (task) => task.status === 'todo';
@@ -10,6 +11,9 @@ export const laneOf = (task) => task.lane ?? (task.following ? 'waiting' : task.
 
 /** Order inside a day: set times first, then the phone's position, then creation. */
 export const byPlan = (a, b) => (a.plan_time ?? 1e9) - (b.plan_time ?? 1e9) || (a.position ?? 1e9) - (b.position ?? 1e9) || a.created_at - b.created_at;
+
+/** Order of a board column or lane; with dated_last, tasks with a date go to the bottom (order.js). */
+export const byLane = (a, b) => laneOrder(isOn('dated_last'))(a, b);
 
 const APPOINTMENT = ['plan_date', 'plan_slot', 'plan_time', 'plan_minutes', 'position'];
 
