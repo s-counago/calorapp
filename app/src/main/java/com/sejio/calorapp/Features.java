@@ -26,6 +26,12 @@ final class Features {
         }
     }
 
+    static final Feature PAUSA_V7 = new Feature("pausa_v7", "Pausa 7: Planificar",
+            "Cuatro pestañas (Hoy, Planificar, Hábitos, Dinero). Planificar junta los carriles con la semana, Hoy enseña lo que quedó atrás y el botón + apunta con una sola línea. Viajes pasa a Ajustes.", false);
+
+    static final Feature CAPTURES = new Feature("captures", "Cajón",
+            "Un sitio donde volcar enlaces, ideas y notas en dos toques (también desde Compartir), para ordenarlos luego en la Bandeja.", false);
+
     static final Feature REVIEW_ZOOM = new Feature("review_zoom", "Resumen Día · Semana · Mes",
             "Un selector encima de Hoy para alejarte del día y ver la semana o el mes.", false);
 
@@ -44,7 +50,7 @@ final class Features {
     static final Feature BUDGET_CLOUD = new Feature("budget_cloud", "Dinero en la web",
             "Sube el resumen de cada ciclo (presupuesto, topes y gasto por categoría) para verlo en la web. Los movimientos y las credenciales no salen del teléfono.", false);
 
-    static final Feature[] ALL = {REVIEW_ZOOM, TASK_KANBAN, HABIT_TASKS, FOCUS_NOTE, BUDGET_CLOUD, HEALTH_CONNECT};
+    static final Feature[] ALL = {PAUSA_V7, CAPTURES, REVIEW_ZOOM, TASK_KANBAN, HABIT_TASKS, FOCUS_NOTE, BUDGET_CLOUD, HEALTH_CONNECT};
 
     private Features() {}
 

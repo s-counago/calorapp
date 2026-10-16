@@ -34,6 +34,10 @@ final class SyncSchema {
         tables.put("health_days", fields(
                 "day", Type.TEXT, "sleep_minutes", Type.INT, "sleep_start", Type.INT, "sleep_end", Type.INT,
                 "steps", Type.INT, "exercise_minutes", Type.INT, "resting_hr", Type.INT, "source", Type.TEXT));
+        // El cajón: raw captures sorted later (backend migration 0008, see CaptureStore).
+        tables.put("captures", fields(
+                "text", Type.TEXT, "url", Type.TEXT, "title", Type.TEXT, "source", Type.TEXT, "status", Type.TEXT,
+                "kind", Type.TEXT, "tags", Type.TEXT, "task_id", Type.TEXT, "suggestion", Type.TEXT, "created_at", Type.INT));
         // Money summary per payday cycle (see BudgetCloud); no movements. Amounts in cents.
         tables.put("budget_cycles", fields(
                 "start", Type.TEXT, "end", Type.TEXT, "current", Type.BOOL, "income", Type.INT, "fixed", Type.INT,

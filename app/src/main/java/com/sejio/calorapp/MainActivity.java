@@ -16,7 +16,8 @@ import java.util.List;
 
 /**
  * App shell. Content scrolls beneath a floating navigation; a contextual action button sits beside it.
- * Sections: 0 Hoy, 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero, 8 Kanban.
+ * Sections: 0 Hoy, 1 Viajes, 2 Lista, 3 Hábitos, 4 Mañana, 5 Semana, 6 Hoy (tablero), 7 Dinero, 8 Kanban,
+ * 9 Planificar. With pausa_v7 on, Planificar replaces Lista, Semana and Kanban, and Viajes moves to Ajustes.
  */
 public class MainActivity extends Activity implements TodayView.Host {
     private static final int REQUEST_NOTIFICATIONS = 42;
@@ -32,6 +33,10 @@ public class MainActivity extends Activity implements TodayView.Host {
     private WeeklyPlannerView weeklyPlannerView;
     private BudgetView budgetView;
     private KanbanView kanbanView;
+    private PlanView planView;
+    private boolean v7;
+    /** Where back goes from a day board: Planificar when it was opened from there, otherwise Hoy. */
+    private int returnTo = 0;
     private View[] sections;
     private PausaNavigation navigation;
     private PausaUi.Segmented taskTabs;
@@ -63,9 +68,26 @@ public class MainActivity extends Activity implements TodayView.Host {
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         setContentView(createAppView());
         showSection(state == null ? 0 : state.getInt("section", 0));
+        handleIntent(getIntent());
         TaskResetScheduler.scheduleNext(this);
         syncNotificationState();
         PausaSync.schedulePeriodic(this);
+    }
+
+    /** The launcher shortcut «Apuntar» opens the capture line straight away. */
+    static final String ACTION_APUNTAR = "com.sejio.calorapp.APUNTAR";
+
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    private void handleIntent(android.content.Intent intent) {
+        if (intent == null || !ACTION_APUNTAR.equals(intent.getAction())) return;
+        intent.setAction(null);
+        PausaLog.i("capture", "opened from shortcut");
+        content.post(() -> QuickCapture.sheet(this, "inbox", this::refreshTasks));
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
@@ -112,8 +134,9 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (weeklyPlannerView != null) weeklyPlannerView.refresh();
         if (currentSection == 7 && budgetView != null) budgetView.refresh();
         if (kanbanView != null) kanbanView.refresh();
+        if (planView != null) planView.refresh();
         // The flag can arrive by sync (MCP or web), not only from Ajustes → Funciones.
-        if (taskTabs != null && kanbanTab != Features.isOn(this, Features.TASK_KANBAN)) featuresChanged();
+        if (taskTabs != null && (kanbanTab != Features.isOn(this, Features.TASK_KANBAN) || v7 != Features.isOn(this, Features.PAUSA_V7))) featuresChanged();
     }
 
     private View createAppView() {
@@ -144,7 +167,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         todayPlannerView = new PlannerView(this, 0);
         budgetView = new BudgetView(this);
         kanbanView = new KanbanView(this);
-        sections = new View[]{counterView, ticketPlannerView, taskListView, habitListView, plannerView, weeklyPlannerView, todayPlannerView, budgetView, kanbanView};
+        planView = new PlanView(this, this);
+        sections = new View[]{counterView, ticketPlannerView, taskListView, habitListView, plannerView, weeklyPlannerView, todayPlannerView, budgetView, kanbanView, planView};
         for (View section : sections) {
             section.setVisibility(View.GONE);
             content.addView(section, new FrameLayout.LayoutParams(-1, -1));
@@ -159,7 +183,8 @@ public class MainActivity extends Activity implements TodayView.Host {
         navRow.setGravity(Gravity.CENTER_VERTICAL);
         navRow.setClipToPadding(false);
         navRow.setClipChildren(false);
-        navigation = new PausaNavigation(this, this::showSection);
+        v7 = Features.isOn(this, Features.PAUSA_V7);
+        navigation = new PausaNavigation(this, this::showSection, v7);
         navRow.addView(navigation, new LinearLayout.LayoutParams(0, dp(68), 1));
         fab = new ImageButton(this);
         fab.setBackground(PausaUi.ripple(this, PausaUi.TERRACOTTA, 34));
@@ -243,6 +268,15 @@ public class MainActivity extends Activity implements TodayView.Host {
     private void featuresChanged() {
         counterView.refresh();
         buildTaskTabs();
+        boolean wasV7 = v7;
+        v7 = Features.isOn(this, Features.PAUSA_V7);
+        if (wasV7 != v7) {
+            navigation.build(v7);
+            int section = currentSection;
+            currentSection = -1;
+            showSection(section);
+            return;
+        }
         if (currentSection == 8 && !Features.isOn(this, Features.TASK_KANBAN)) showSection(2);
     }
 
@@ -250,7 +284,11 @@ public class MainActivity extends Activity implements TodayView.Host {
 
     private void showSection(int section) {
         section = Math.max(0, Math.min(sections.length - 1, section));
+        // Planificar takes the place of the list, the half-hour week and the Kanban.
+        if (v7 && (section == 2 || section == 5 || section == 8)) section = 9;
+        if (!v7 && section == 9) section = 2;
         if (section == 8 && !Features.isOn(this, Features.TASK_KANBAN)) section = 2;
+        if (section == 4 || section == 6) returnTo = v7 && currentSection == 9 ? 9 : section == currentSection ? returnTo : 0;
         if (section == currentSection) return;
         int old = currentSection; currentSection = section;
         View focus = getCurrentFocus();
@@ -270,6 +308,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         if (section == 5) weeklyPlannerView.refresh();
         if (section == 6) todayPlannerView.refresh();
         if (section == 8) kanbanView.refresh();
+        if (section == 9) planView.refresh();
         if (section == 7) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
             budgetView.refresh();
@@ -279,7 +318,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         View incoming = sections[section];
         incoming.setVisibility(View.VISIBLE);
         navigation.select(section, old != -1);
-        boolean tasks = isTaskSection(section);
+        boolean tasks = isTaskSection(section) && !v7;
         boolean headerWasVisible = taskHeader.getVisibility() == View.VISIBLE;
         taskHeader.setVisibility(tasks ? View.VISIBLE : View.GONE);
         if (tasks) {
@@ -287,7 +326,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         }
         updateFab(section, old != -1);
         if (old != -1 && PausaUi.motion(this)) {
-            boolean sameTab = PausaNavigation.tabFor(old) == PausaNavigation.tabFor(section);
+            boolean sameTab = navigation.tabFor(old) == navigation.tabFor(section);
             if (sameTab) {
                 // Moving between segments slides sideways, in the direction of travel.
                 int from = indexOf(old), to = indexOf(section);
@@ -324,6 +363,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         }
         String icon = section == 1 ? "ticket" : "plus";
         String label = section == 1 ? "Revisar y formalizar" : section == 3 ? "Nuevo hábito"
+                : v7 && (section == 0 || section == 9) ? "Apuntar"
                 : section == 6 ? "Añadir al plan de hoy" : section == 4 ? "Añadir al plan de mañana"
                 : section == 8 ? "Nueva tarjeta" : "Nueva tarea";
         fab.setContentDescription(label);
@@ -379,6 +419,7 @@ public class MainActivity extends Activity implements TodayView.Host {
             case 4: plannerView.openPicker(0); break;
             case 6: todayPlannerView.openPicker(PausaUi.currentFranja()); break;
             case 5: TaskSheets.capture(this, -1, PausaUi.currentFranja(), this::refreshTasks); break;
+            case 9: QuickCapture.sheet(this, "inbox", this::refreshTasks); break;
             default: capture();
         }
     }
@@ -390,13 +431,21 @@ public class MainActivity extends Activity implements TodayView.Host {
         plannerView.refresh();
         weeklyPlannerView.refresh();
         kanbanView.refresh();
+        planView.refresh();
     }
 
     // ------------------------------------------------------------ TodayView.Host
 
-    @Override public void open(int section) { showSection(section); }
+    /** Planificar opened from Hoy (the Cajón line, what was left behind) starts on the Bandeja. */
+    @Override public void open(int section) {
+        if (section == 9) planView.showLane("inbox");
+        showSection(section);
+    }
 
-    @Override public void capture() { TaskSheets.capture(this, 0, PausaUi.currentFranja(), this::refreshTasks); }
+    @Override public void capture() {
+        if (v7) QuickCapture.sheet(this, "inbox", this::refreshTasks);
+        else TaskSheets.capture(this, 0, PausaUi.currentFranja(), this::refreshTasks);
+    }
 
     @Override public void settings() {
         PausaUi.Sheet sheet = new PausaUi.Sheet(this, "Ajustes");
@@ -429,6 +478,7 @@ public class MainActivity extends Activity implements TodayView.Host {
         sheet.add(counterView.settingRow("Google Calendar", CalendarSync.status(this), () -> {
             sheet.dismiss(); startActivity(new android.content.Intent(this, CalendarConnectionActivity.class));
         }), 8);
+        if (v7) sheet.add(counterView.settingRow("Viajes", "Renfe y formalizar", () -> { sheet.dismiss(); showSection(1); }), 8);
         sheet.add(counterView.settingRow("Funciones", Features.summary(this), () -> {
             sheet.dismiss(); Features.sheet(this, this::featuresChanged);
         }), 8);
@@ -460,7 +510,9 @@ public class MainActivity extends Activity implements TodayView.Host {
     }
 
     @Override public void onBackPressed() {
-        if (currentSection != 0) showSection(0); else super.onBackPressed();
+        if ((currentSection == 4 || currentSection == 6) && returnTo == 9 && v7) showSection(9);
+        else if (currentSection != 0) showSection(0);
+        else super.onBackPressed();
     }
 
     private void requestNotificationPermissionIfNeeded() {

@@ -52,6 +52,10 @@ final class TodayView extends PausaUi.Scroll {
     /** Sleep, steps, exercise and resting pulse from the watch (feature health_connect). */
     private final LinearLayout healthCard, healthStats;
     private final TextView healthNote;
+    /** pausa_v7: what was left planned on past days, and the line that leads to the cajón. */
+    private final LinearLayout leftOver;
+    private final TextView cajonLine;
+    private View notionRow;
     private final Button healthConnect;
     private LinearLayout.LayoutParams cigarettesParams;
     private final TextView tomorrowLine;
@@ -301,7 +305,8 @@ final class TodayView extends PausaUi.Scroll {
         rituals.addView(ritualsLabel, full());
         ritual = new PausaUi.Check(activity, 0xFFC98A1C);
         ritualText = PausaUi.text(activity, activity.getString(R.string.notion_priority_review), 15, PausaUi.INK, false);
-        rituals.addView(ritualRow(ritual, ritualText, done -> { TaskStore.setNotionReviewDone(activity, done); strike(ritualText, done); }), full());
+        notionRow = ritualRow(ritual, ritualText, done -> { TaskStore.setNotionReviewDone(activity, done); strike(ritualText, done); });
+        rituals.addView(notionRow, full());
         habitRitual = new PausaUi.Check(activity, 0xFFC98A1C);
         habitRitualText = PausaUi.text(activity, activity.getString(R.string.habit_review), 15, PausaUi.INK, false);
         View habitRow = ritualRow(habitRitual, habitRitualText, done -> { TaskStore.setHabitReviewDone(activity, done); strike(habitRitualText, done); });
@@ -312,6 +317,22 @@ final class TodayView extends PausaUi.Scroll {
 
         dayList = column();
         root.addView(dayList, spaced(0, 10));
+
+        leftOver = column();
+        leftOver.setVisibility(View.GONE);
+        root.addView(leftOver, spaced(0, 10));
+
+        cajonLine = PausaUi.text(activity, "", 14, PausaUi.INK, false);
+        cajonLine.setGravity(Gravity.CENTER_VERTICAL);
+        cajonLine.setMinHeight(dp(56));
+        cajonLine.setPadding(dp(16), 0, dp(14), 0);
+        cajonLine.setBackground(PausaUi.cardRipple(activity));
+        cajonLine.setCompoundDrawables(new PausaUi.Symbol(activity, "box", PausaUi.GREEN, 20), null,
+                new PausaUi.Symbol(activity, "chevron", PausaUi.MUTED, 18), null);
+        cajonLine.setCompoundDrawablePadding(dp(12));
+        cajonLine.setOnClickListener(v -> host.open(9));
+        cajonLine.setVisibility(View.GONE);
+        root.addView(cajonLine, spaced(0, 8));
 
         tomorrowLine = PausaUi.text(activity, "", 14, PausaUi.INK, false);
         tomorrowLine.setGravity(Gravity.CENTER_VERTICAL);
@@ -594,6 +615,76 @@ final class TodayView extends PausaUi.Scroll {
         tomorrowLine.setText(tomorrow == 0 ? "Prepara mañana con calma"
                 : "Mañana: " + tomorrow + (tomorrow == 1 ? " tarea preparada" : " tareas preparadas"));
         tomorrowLine.setContentDescription(tomorrowLine.getText() + ". Abrir el plan de mañana");
+        refreshLeftOver();
+    }
+
+    /**
+     * «Quedó atrás»: tasks still planned on a past day, each with three ways out: today, back to its
+     * lane (off the plan) or to Fracasos. Nothing moves on its own. Only with pausa_v7.
+     */
+    private void refreshLeftOver() {
+        leftOver.removeAllViews();
+        boolean v7 = Features.isOn(activity, Features.PAUSA_V7);
+        int fresh = v7 && Features.isOn(activity, Features.CAPTURES) ? CaptureStore.freshCount(activity) : 0;
+        cajonLine.setVisibility(fresh > 0 ? View.VISIBLE : View.GONE);
+        cajonLine.setText("Cajón · " + fresh + (fresh == 1 ? " cosa sin ordenar" : " cosas sin ordenar"));
+        cajonLine.setContentDescription(cajonLine.getText() + ". Abrir la bandeja");
+        if (notionRow != null) notionRow.setVisibility(v7 ? View.GONE : View.VISIBLE);
+        List<TaskStore.Task> tasks = v7 ? TaskStore.leftOver(activity) : java.util.Collections.emptyList();
+        leftOver.setVisibility(tasks.isEmpty() ? View.GONE : View.VISIBLE);
+        if (tasks.isEmpty()) return;
+        LinearLayout card = column();
+        card.setBackground(PausaUi.surface(activity, PausaUi.PEACH_SOFT, 20));
+        card.setPadding(dp(16), dp(12), dp(8), dp(6));
+        TextView label = PausaUi.eyebrow(activity, "Quedó atrás · " + tasks.size(), PausaUi.TERRACOTTA);
+        label.setPadding(0, 0, 0, dp(4));
+        card.addView(label, full());
+        int shown = Math.min(tasks.size(), 5);
+        for (int i = 0; i < shown; i++) card.addView(leftOverRow(tasks.get(i)), full());
+        if (tasks.size() > shown) {
+            Button rest = PausaUi.quiet(activity, "Ver las " + tasks.size() + " en Planificar", PausaUi.TERRACOTTA, () -> host.open(9));
+            card.addView(rest, new LinearLayout.LayoutParams(-2, dp(44)));
+        }
+        leftOver.addView(card, full());
+    }
+
+    private View leftOverRow(TaskStore.Task task) {
+        LinearLayout row = column();
+        row.setPadding(0, dp(6), 0, 0);
+        TextView text = PausaUi.text(activity, task.text, 15, PausaUi.INK, false);
+        text.setMaxLines(3);
+        text.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        row.addView(text, full());
+        TextView when = PausaUi.text(activity, "Era para " + Planning.dayName(task.planDate).toLowerCase(PausaUi.SPANISH)
+                + " · " + TaskStore.laneLabel(task.lane()), 12, PausaUi.MUTED, false);
+        when.setPadding(0, dp(3), 0, 0);
+        row.addView(when, full());
+        LinearLayout actions = new LinearLayout(activity);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        actions.addView(PausaUi.quiet(activity, "A hoy", PausaUi.GREEN, () -> moveLeftOver(task, "today")));
+        actions.addView(PausaUi.quiet(activity, "A " + TaskStore.laneLabel(task.lane()).toLowerCase(PausaUi.SPANISH), PausaUi.GREEN,
+                () -> moveLeftOver(task, "lane")));
+        if (!"failed".equals(task.lane())) actions.addView(PausaUi.quiet(activity, "Fracaso", PausaUi.TERRACOTTA, () -> moveLeftOver(task, "failed")));
+        row.addView(actions, full());
+        row.setContentDescription(task.text + ". " + when.getText());
+        return row;
+    }
+
+    private void moveLeftOver(TaskStore.Task task, String where) {
+        String lane = task.lane();
+        switch (where) {
+            case "today": TaskStore.plan(activity, task.id, DayPlanStore.day(0), task.planSlot); break;
+            case "failed": TaskStore.plan(activity, task.id, null, null); TaskStore.setLane(activity, task.id, "failed"); break;
+            default: TaskStore.plan(activity, task.id, null, null);
+        }
+        refreshDay();
+        String message = "today".equals(where) ? "Para hoy." : "failed".equals(where) ? "A Fracasos. Se queda a la vista."
+                : "De vuelta a " + TaskStore.laneLabel(lane).toLowerCase(PausaUi.SPANISH) + ".";
+        PausaUi.snack(activity, message, "Deshacer", () -> {
+            TaskStore.plan(activity, task.id, task.planDate, task.planSlot);
+            if (!lane.equals(task.lane()) || "failed".equals(where)) TaskStore.setLane(activity, task.id, lane);
+            refreshDay();
+        });
     }
 
     private View taskRow(TaskStore.Task task) {

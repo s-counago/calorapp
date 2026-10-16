@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the icon: «Apuntar» opens the capture line straight away (MainActivity.ACTION_APUNTAR). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="apuntar"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_apuntar"
+        android:shortcutLongLabel="@string/shortcut_apuntar_long">
+        <intent
+            android:action="com.sejio.calorapp.APUNTAR"
+            android:targetPackage="com.sejio.calorapp"
+            android:targetClass="com.sejio.calorapp.MainActivity" />
+    </shortcut>
+</shortcuts>
