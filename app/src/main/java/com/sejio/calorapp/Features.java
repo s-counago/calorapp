@@ -53,7 +53,10 @@ final class Features {
     static final Feature NOTIFICATION_PANEL = new Feature("notification_panel", "Panel en la notificación",
             "La notificación fija pasa a ser un solo panel con calorías, proteína y cigarros, botones cortos y un fondo que cambia con la luz del día.", false);
 
-    static final Feature[] ALL = {PAUSA_V7, CAPTURES, REVIEW_ZOOM, TASK_KANBAN, HABIT_TASKS, FOCUS_NOTE, BUDGET_CLOUD, HEALTH_CONNECT, NOTIFICATION_PANEL};
+    static final Feature DATED_LAST = new Feature("dated_last", "Con fecha, al fondo",
+            "En el tablero y en los carriles, las tareas sin fecha quedan arriba y las que tienen día (o vencimiento) bajan al fondo, de la más próxima a la más lejana.", false);
+
+    static final Feature[] ALL = {PAUSA_V7, CAPTURES, REVIEW_ZOOM, TASK_KANBAN, HABIT_TASKS, FOCUS_NOTE, BUDGET_CLOUD, HEALTH_CONNECT, NOTIFICATION_PANEL, DATED_LAST};
 
     private Features() {}
 

@@ -208,7 +208,7 @@ final class TaskStore {
         LegacyImport.runOnce(context);
         List<Task> tasks = new ArrayList<>();
         for (Map<String, Object> row : PausaDb.get(context).rows(
-                "SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND board = ? ORDER BY created_at DESC, local_id DESC", column)) {
+                "SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND board = ? ORDER BY " + listOrder(context), column)) {
             tasks.add(fromRow(row));
         }
         return tasks;
@@ -257,12 +257,22 @@ final class TaskStore {
         return LANE_LABELS[0];
     }
 
+    /**
+     * Newest first. With dated_last, tasks without a date come first (still newest first) and those with
+     * a day or a due date go to the bottom, soonest first. Same rule as datedLast in the web.
+     */
+    private static String listOrder(Context context) {
+        String newest = "created_at DESC, local_id DESC";
+        if (!Features.isOn(context, Features.DATED_LAST)) return newest;
+        return "COALESCE(plan_date, due_date) IS NOT NULL, COALESCE(plan_date, due_date), " + newest;
+    }
+
     /** Open tasks of one lane, newest first. */
     static List<Task> lane(Context context, String lane) {
         LegacyImport.runOnce(context);
         List<Task> tasks = new ArrayList<>();
         for (Map<String, Object> row : PausaDb.get(context).rows("SELECT * FROM tasks WHERE deleted = 0 AND status = 'todo' AND "
-                + LANE_SQL + " = ? ORDER BY created_at DESC, local_id DESC", lane)) {
+                + LANE_SQL + " = ? ORDER BY " + listOrder(context), lane)) {
             tasks.add(fromRow(row));
         }
         return tasks;

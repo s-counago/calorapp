@@ -4,7 +4,7 @@
 
 import { Pausa } from '../api.js';
 import { state } from '../state.js';
-import { dropTarget, laneMenu, laneOf, moveTo, quickAdd, taskRow } from '../tasks.js';
+import { byLane, dropTarget, laneMenu, laneOf, moveTo, quickAdd, taskRow } from '../tasks.js';
 import { LANE_LABELS, askNumber, attempt, h, toast, fill } from '../ui.js';
 
 const PAGE = 60;
@@ -29,7 +29,7 @@ export async function renderBoard(root) {
     ),
     h('p.hint', 'Cada tarea está en un carril. Arrástrala a otro para moverla; si tenía día, lo conserva.'),
     h('div.board', lanes.map((lane, index) => {
-      const tasks = lists[index].sort((a, b) => b.created_at - a.created_at);
+      const tasks = lists[index].sort(byLane);
       const query = (filters[lane] ?? '').toLowerCase();
       const matching = query ? tasks.filter((task) => task.title.toLowerCase().includes(query) || (task.notes ?? '').toLowerCase().includes(query)) : tasks;
       const limit = shown[lane] ?? PAGE;
