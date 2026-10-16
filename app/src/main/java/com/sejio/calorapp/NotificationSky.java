@@ -15,7 +15,7 @@ import java.util.Random;
 
 /**
  * The background of the notification panel: the light of Hoy (PausaUi.skyColor) painted as a sky.
- * The sun crosses the panel from 07:00 to 21:00 and glows in the colour of the hour (sun in the
+ * The sun crosses the left of the panel from 07:00 to 21:00 and glows in the colour of the hour (sun in the
  * morning, terracotta in the evening); at night there is a moon and a few stars. The base stays deep
  * green so the cream text on top always reads.
  */
@@ -44,8 +44,9 @@ final class NotificationSky {
 
         // Where the light comes from: the sun along its arc, or the moon high on the right.
         float t = clamp((hour - 7f) / 14f);
-        float sx = night ? w * .86f : w * (.06f + .88f * t);
-        float sy = night ? h * .24f : h * (.95f - .78f * (float) Math.sin(Math.PI * t));
+        // The light stays left of the buttons (the right ~35%), so it never sits under a label.
+        float sx = night ? w * .56f : w * (.05f + .55f * t);
+        float sy = night ? h * .2f : h * (.95f - .78f * (float) Math.sin(Math.PI * t));
         float glow = Math.max(w, h) * (night ? .55f : .8f);
         paint.setShader(new RadialGradient(sx, sy, glow,
                 new int[]{alpha(light, night ? .30f : .55f), alpha(light, night ? .10f : .20f), Color.TRANSPARENT},
@@ -74,10 +75,10 @@ final class NotificationSky {
             Path bite = new Path();
             bite.addCircle(sx + body * .55f, sy - body * .3f, body * .9f, Path.Direction.CW);
             moon.op(bite, Path.Op.DIFFERENCE);
-            paint.setColor(alpha(PausaUi.ON_NIGHT, .82f));
+            paint.setColor(alpha(PausaUi.ON_NIGHT, .6f));
             canvas.drawPath(moon, paint);
         } else {
-            paint.setColor(alpha(blend(light, Color.WHITE, .35f), .38f));
+            paint.setColor(alpha(blend(light, Color.WHITE, .35f), .28f));
             canvas.drawCircle(sx, sy, body, paint);
             paint.setColor(alpha(blend(light, Color.WHITE, .5f), .16f));
             canvas.drawCircle(sx, sy, body * 1.7f, paint);

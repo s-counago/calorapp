@@ -124,7 +124,7 @@ final class NotificationHelper {
         button(panel, R.id.panel_cal_b, "+200", "Añadir 200 kcal", addPendingIntent(context, 200, 12));
 
         counterRow(context, panel, R.id.panel_protein_icon, "protein", PROTEIN_TINT,
-                R.id.panel_protein_value, value(protein + " g", " / " + proteinGoal + " g de proteína"),
+                R.id.panel_protein_value, value(protein + " g", " / " + proteinGoal + " g"),
                 R.id.panel_protein_bar, R.id.panel_protein_over, protein, proteinGoal, false);
         button(panel, R.id.panel_protein_a, "+5", "Añadir 5 g de proteína", proteinPendingIntent(context, 5, 13));
         button(panel, R.id.panel_protein_b, "+10", "Añadir 10 g de proteína", proteinPendingIntent(context, 10, 14));
